@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
@@ -39,6 +38,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
     private readonly HttpClient _httpClient;
     private readonly YoteiDbContext _dbContext;
     private readonly IRawDiffStorage _rawDiffStorage;
+    private readonly IGitHubAccessTokenProvider _accessTokenProvider;
     private readonly GitHubSettings _settings;
     private readonly ILogger<GithubIngestionService> _logger;
 
@@ -55,15 +55,15 @@ public sealed class GithubIngestionService : IGithubIngestionService
         IOptions<GitHubSettings> settings,
         YoteiDbContext dbContext,
         IRawDiffStorage rawDiffStorage,
+        IGitHubAccessTokenProvider accessTokenProvider,
         ILogger<GithubIngestionService> logger)
     {
         _httpClient = httpClient;
         _settings = settings.Value;
         _dbContext = dbContext;
         _rawDiffStorage = rawDiffStorage;
+        _accessTokenProvider = accessTokenProvider;
         _logger = logger;
-
-        ConfigureHttpClient();
     }
 
     /// <inheritdoc />
@@ -199,25 +199,15 @@ public sealed class GithubIngestionService : IGithubIngestionService
         return new GitHubSyncResult(repositories, pullRequests, snapshotsCreated, errors);
     }
 
-    // Configures default headers and base address for GitHub API requests.
-    private void ConfigureHttpClient()
+    // Sends an authenticated request to the GitHub API.
+    private async Task<HttpResponseMessage> SendAsync(
+        HttpMethod method,
+        string url,
+        CancellationToken cancellationToken)
     {
-        if (!Uri.TryCreate(_settings.BaseUrl, UriKind.Absolute, out var baseUri))
-        {
-            throw new InvalidOperationException("GitHub base URL is invalid.");
-        }
-
-        _httpClient.BaseAddress = baseUri;
-        _httpClient.DefaultRequestHeaders.UserAgent.Clear();
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Yotei/0.1");
-        _httpClient.DefaultRequestHeaders.Accept.Clear();
-        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-
-        if (!string.IsNullOrWhiteSpace(_settings.Token))
-        {
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", _settings.Token);
-        }
+        using var request = new HttpRequestMessage(method, url);
+        await _accessTokenProvider.ApplyAuthenticationAsync(request, cancellationToken);
+        return await _httpClient.SendAsync(request, cancellationToken);
     }
 
     // Retrieves pull request details from the GitHub API.
@@ -227,7 +217,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
         CancellationToken cancellationToken)
     {
         var url = $"/repos/{request.Owner}/{request.Name}/pulls/{request.PrNumber}";
-        var response = await _httpClient.GetAsync(url, cancellationToken);
+        var response = await SendAsync(HttpMethod.Get, url, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -256,7 +246,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
         while (true)
         {
             var url = $"/repos/{request.Owner}/{request.Name}/pulls/{request.PrNumber}/files?per_page={PageSize}&page={page}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            var response = await SendAsync(HttpMethod.Get, url, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 errors.Add($"GitHub file list fetch failed with status {(int)response.StatusCode}.");
@@ -293,7 +283,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
         while (true)
         {
             var url = $"/repos/{repo.Owner}/{repo.Name}/pulls?state=open&per_page={PageSize}&page={page}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            var response = await SendAsync(HttpMethod.Get, url, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 errors.Add($"GitHub pull list fetch failed with status {(int)response.StatusCode}.");

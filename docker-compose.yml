@@ -44,6 +44,10 @@ services:
       Seed__FixturePath: Fixtures/seed.json
       GitHub__BaseUrl: https://api.github.com
       GitHub__Token: ${GITHUB_TOKEN}
+      GitHub__App__AppId: ${GITHUB_APP_ID}
+      GitHub__App__InstallationId: ${GITHUB_APP_INSTALLATION_ID}
+      GitHub__App__PrivateKey: ${GITHUB_APP_PRIVATE_KEY}
+      GitHub__App__WebhookSecret: ${GITHUB_APP_WEBHOOK_SECRET}
     ports:
       - "8080:8080"
     depends_on:

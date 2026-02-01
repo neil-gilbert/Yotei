@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
 using Yotei.Api.Models;
@@ -102,6 +103,168 @@ public static class IngestionEndpoints
             return Results.Ok(response);
         });
 
+        // Handle GitHub webhook events to ingest PRs automatically.
+        app.MapPost("/ingest/github/webhook", async (
+            HttpRequest request,
+            IGithubIngestionService ingestionService,
+            IConfiguration configuration,
+            ILoggerFactory loggerFactory,
+            CancellationToken cancellationToken) =>
+        {
+            var logger = loggerFactory.CreateLogger("GitHubWebhook");
+            var payload = await ReadRequestBodyAsync(request, cancellationToken);
+            if (payload is null)
+            {
+                return Results.BadRequest(new { error = "Webhook payload is missing." });
+            }
+
+            var secret = configuration.GetValue<string>("GitHub:App:WebhookSecret");
+            if (!GitHubWebhookVerifier.IsSignatureValid(secret, request.Headers["X-Hub-Signature-256"], payload))
+            {
+                return Results.Unauthorized();
+            }
+
+            var eventName = request.Headers["X-GitHub-Event"].ToString();
+            if (string.IsNullOrWhiteSpace(eventName))
+            {
+                return Results.BadRequest(new { error = "Missing X-GitHub-Event header." });
+            }
+
+            return eventName switch
+            {
+                "ping" => Results.Ok(new { status = "pong" }),
+                "pull_request" => await HandlePullRequestWebhookAsync(payload, ingestionService, logger, cancellationToken),
+                _ => Results.Ok(new { ignored = eventName })
+            };
+        });
+
         return app;
+    }
+
+    // Reads the raw request body for webhook validation.
+    private static async Task<string?> ReadRequestBodyAsync(HttpRequest request, CancellationToken cancellationToken)
+    {
+        if (request.Body is null)
+        {
+            return null;
+        }
+
+        using var reader = new StreamReader(request.Body);
+        var body = await reader.ReadToEndAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        return string.IsNullOrWhiteSpace(body) ? null : body;
+    }
+
+    // Handles GitHub pull request webhook events.
+    private static async Task<IResult> HandlePullRequestWebhookAsync(
+        string payload,
+        IGithubIngestionService ingestionService,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (!TryParsePullRequestPayload(payload, out var owner, out var name, out var prNumber, out var action))
+        {
+            return Results.BadRequest(new { error = "Invalid pull request payload." });
+        }
+
+        if (!ShouldIngestAction(action))
+        {
+            return Results.Ok(new { ignored = action });
+        }
+
+        var result = await ingestionService.IngestPullRequestAsync(
+            new GitHubIngestRequest(owner, name, prNumber),
+            cancellationToken);
+
+        if (result.Errors.Count > 0 || result.SnapshotId is null)
+        {
+            logger.LogWarning("GitHub webhook ingestion failed: {Errors}", string.Join(" | ", result.Errors));
+            return Results.Problem(detail: string.Join(" | ", result.Errors));
+        }
+
+        return Results.Ok(new { snapshotId = result.SnapshotId, created = result.Created });
+    }
+
+    // Determines whether a pull request action should trigger ingestion.
+    private static bool ShouldIngestAction(string? action)
+    {
+        return action switch
+        {
+            "opened" => true,
+            "reopened" => true,
+            "synchronize" => true,
+            "ready_for_review" => true,
+            _ => false
+        };
+    }
+
+    // Parses pull request webhook payload details.
+    private static bool TryParsePullRequestPayload(
+        string payload,
+        out string owner,
+        out string name,
+        out int prNumber,
+        out string? action)
+    {
+        owner = string.Empty;
+        name = string.Empty;
+        prNumber = 0;
+        action = null;
+
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("action", out var actionElement))
+        {
+            return false;
+        }
+
+        action = actionElement.GetString();
+        if (!root.TryGetProperty("pull_request", out var pullRequestElement))
+        {
+            return false;
+        }
+
+        if (!pullRequestElement.TryGetProperty("number", out var numberElement) ||
+            !numberElement.TryGetInt32(out prNumber))
+        {
+            return false;
+        }
+
+        if (!root.TryGetProperty("repository", out var repoElement))
+        {
+            return false;
+        }
+
+        if (!TryGetString(repoElement, "name", out name))
+        {
+            return false;
+        }
+
+        if (!repoElement.TryGetProperty("owner", out var ownerElement) ||
+            !TryGetString(ownerElement, "login", out owner))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    // Reads a required string property from a JSON element.
+    private static bool TryGetString(JsonElement element, string propertyName, out string value)
+    {
+        value = string.Empty;
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return false;
+        }
+
+        var text = property.GetString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        value = text;
+        return true;
     }
 }

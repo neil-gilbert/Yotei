@@ -45,4 +45,18 @@ podman compose run --rm e2e
 ## Notes
 
 - LocalStack seeds an S3 bucket and SQS queue on startup.
-- No GitHub webhooks are used in this phase; ingestion will be pull-based or fixture-based.
+- GitHub ingestion supports both manual pull-based triggers and webhook-driven sync.
+
+## GitHub App ingestion (recommended)
+
+For production-style usage, configure a GitHub App instead of PATs.
+
+1) Create a GitHub App and install it on the repo or org.
+2) Set the app credentials (see `.env.example`):
+   - `GITHUB_APP_ID`
+   - `GITHUB_APP_INSTALLATION_ID`
+   - `GITHUB_APP_PRIVATE_KEY` (PEM or base64-encoded PEM)
+   - `GITHUB_APP_WEBHOOK_SECRET`
+3) Add a webhook pointing to `/ingest/github/webhook`.
+
+The API will automatically ingest PRs on `opened`, `reopened`, `synchronize`, and `ready_for_review`.

@@ -35,6 +35,12 @@ public static class ServiceRegistration
         services.Configure<GitHubSettings>(configuration.GetSection("GitHub"));
         services.Configure<OpenAiSettings>(configuration.GetSection("OpenAI"));
         services.Configure<FlowInferenceOptions>(configuration.GetSection("FlowInference"));
+        services.AddSingleton<IGitHubAccessTokenProvider, GitHubAccessTokenProvider>();
+        services.AddHttpClient(GitHubHttpClientConfigurator.ClientName, (provider, client) =>
+        {
+            var settings = provider.GetRequiredService<IOptions<GitHubSettings>>().Value;
+            GitHubHttpClientConfigurator.Configure(client, settings);
+        });
         var storageProvider = configuration.GetValue<string>("Storage:Provider") ?? "S3";
         if (string.Equals(storageProvider, "Database", StringComparison.OrdinalIgnoreCase))
         {
@@ -56,7 +62,11 @@ public static class ServiceRegistration
         services.AddSingleton<IFlowInferenceAdapter, CSharpFlowInferenceAdapter>();
         services.AddSingleton<IFlowInferenceAdapter, JavaScriptFlowInferenceAdapter>();
         services.AddScoped<FlowInferenceAdapterRegistry>();
-        services.AddHttpClient<IGithubIngestionService, GithubIngestionService>();
+        services.AddHttpClient<IGithubIngestionService, GithubIngestionService>((provider, client) =>
+        {
+            var settings = provider.GetRequiredService<IOptions<GitHubSettings>>().Value;
+            GitHubHttpClientConfigurator.Configure(client, settings);
+        });
         services.AddHttpClient<IOpenAiClient, OpenAiClient>((provider, client) =>
         {
             var settings = provider.GetRequiredService<IOptions<OpenAiSettings>>().Value;
