@@ -1,0 +1,49 @@
+databases:
+  - name: yotei-postgres
+    databaseName: yotei
+    user: yotei
+    region: frankfurt
+    plan: starter
+    postgresMajorVersion: 16
+
+services:
+  - type: web
+    name: yotei-api
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    dockerContext: .
+    dockerfilePath: backend/src/Api/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: PORT
+        value: "8080"
+      - key: ConnectionStrings__Postgres
+        fromDatabase:
+          name: yotei-postgres
+          property: connectionString
+      - key: Database__Provider
+        value: Postgres
+      - key: Database__ApplyMigrations
+        value: "true"
+      - key: Storage__Provider
+        value: Database
+      - key: Cors__AllowedOrigins__0
+        fromService:
+          name: yotei-frontend
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+
+  - type: web
+    name: yotei-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          name: yotei-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL

@@ -1,0 +1,65 @@
+@Api_HostAddress = http://localhost:8080
+
+GET {{Api_HostAddress}}/health
+Accept: application/json
+
+###
+
+POST {{Api_HostAddress}}/ingest/snapshot
+Content-Type: application/json
+
+{
+  "owner": "acme",
+  "name": "payments",
+  "prNumber": 42,
+  "baseSha": "abc123",
+  "headSha": "def456",
+  "defaultBranch": "main",
+  "source": "fixture",
+  "title": "Add retry logic"
+}
+
+###
+
+GET {{Api_HostAddress}}/snapshots
+Accept: application/json
+
+###
+
+POST {{Api_HostAddress}}/snapshots/{{snapshotId}}/file-changes
+Content-Type: application/json
+
+{
+  "changes": [
+    {
+      "path": "src/api/payments.cs",
+      "changeType": "modified",
+      "addedLines": 10,
+      "deletedLines": 2,
+      "rawDiffRef": "s3://yotei-artifacts/sample.diff"
+    }
+  ]
+}
+
+###
+
+POST {{Api_HostAddress}}/snapshots/{{snapshotId}}/file-changes/upload
+Content-Type: application/json
+
+{
+  "path": "src/api/payments.cs",
+  "changeType": "modified",
+  "addedLines": 10,
+  "deletedLines": 2,
+  "diff": "@@ -1,2 +1,3 @@\\n+// example diff\\n"
+}
+
+###
+
+GET {{Api_HostAddress}}/snapshots/{{snapshotId}}/file-changes
+Accept: application/json
+
+###
+
+GET {{Api_HostAddress}}/snapshots/{{snapshotId}}
+Accept: application/json

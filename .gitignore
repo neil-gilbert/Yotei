@@ -1,0 +1,18 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+
+# Node
+node_modules/
+dist/
+.npm-cache/
+
+# Env
+.env
+
+# OS
+.DS_Store

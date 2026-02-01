@@ -1,0 +1,77 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: yotei
+      POSTGRES_PASSWORD: yotei
+      POSTGRES_DB: yotei
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  localstack:
+    image: localstack/localstack:3.6.0
+    environment:
+      SERVICES: s3,sqs
+      EDGE_PORT: 4566
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./infra/localstack/init:/etc/localstack/init
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/src/Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: Host=db;Port=5432;Database=yotei;Username=yotei;Password=yotei
+      LocalStack__Endpoint: http://localstack:4566
+      LocalStack__S3Bucket: yotei-artifacts
+      LocalStack__QueueName: yotei-analysis
+      Storage__Endpoint: http://localstack:4566
+      Storage__S3Bucket: yotei-artifacts
+      Storage__AccessKey: test
+      Storage__SecretKey: test
+      Storage__Region: us-east-1
+      Storage__Provider: Database
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      Seed__Enabled: "true"
+      Seed__FixturePath: Fixtures/seed.json
+      GitHub__BaseUrl: https://api.github.com
+      GitHub__Token: ${GITHUB_TOKEN}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+      - localstack
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+  e2e:
+    build:
+      context: .
+      dockerfile: e2e/Dockerfile
+    environment:
+      API_URL: http://api:8080
+      UI_URL: http://frontend:5173
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  db-data:
+  localstack-data:

@@ -1,0 +1,141 @@
+{
+  "fixtures": [
+    {
+      "owner": "acme",
+      "name": "payments",
+      "prNumber": 412,
+      "baseSha": "base-payments",
+      "headSha": "head-payments",
+      "defaultBranch": "main",
+      "title": "Harden payments + webhook intake",
+      "source": "fixture",
+      "ingestedAt": "2026-01-25T09:15:00Z",
+      "fileChanges": [
+        {
+          "path": "src/api/PaymentsController.cs",
+          "changeType": "modified",
+          "addedLines": 38,
+          "deletedLines": 8,
+          "rawDiff": "diff --git a/src/api/PaymentsController.cs b/src/api/PaymentsController.cs\nindex 0a0a0a0..1b1b1b1 100644\n--- a/src/api/PaymentsController.cs\n+++ b/src/api/PaymentsController.cs\n@@ -12,12 +12,38 @@ public class PaymentsController {\n-    var amount = order.Total;\n-    return Ok();\n+    var amount = order.Total;\n+    var token = request.Headers[\"Authorization\"];\n+    if (string.IsNullOrEmpty(token)) {\n+        audit.Log(\"missing-token\", request.UserId);\n+        return Unauthorized();\n+    }\n+    var customerEmail = request.Email;\n+    var invoice = invoiceService.Create(amount, customerEmail);\n+    await httpClient.PostAsync(\"https://api.stripe.com/charge\", payload);\n+    await db.Payments.AddAsync(new PaymentRecord { Email = customerEmail, Amount = amount });\n+    await db.SaveChangesAsync();\n+    await notifier.SendAsync(\"payment.received\", invoice.Id);\n+    return Ok(new { invoiceId = invoice.Id });\n }\n"
+        },
+        {
+          "path": "src/api/webhooks/StripeWebhookHandler.cs",
+          "changeType": "added",
+          "addedLines": 30,
+          "deletedLines": 0,
+          "rawDiff": "diff --git a/src/api/webhooks/StripeWebhookHandler.cs b/src/api/webhooks/StripeWebhookHandler.cs\nnew file mode 100644\nindex 0000000..2c2c2c2\n--- /dev/null\n+++ b/src/api/webhooks/StripeWebhookHandler.cs\n@@ -0,0 +1,16 @@\n+public class StripeWebhookHandler {\n+    public async Task HandleAsync(Request request) {\n+        var signature = request.Headers[\"Stripe-Signature\"];\n+        if (!auth.Verify(signature)) {\n+            audit.Log(\"stripe-webhook-denied\", request.UserId);\n+            return Unauthorized();\n+        }\n+        await queue.PublishAsync(\"payments.webhook\", request.Body);\n+        await db.WebhookEvents.AddAsync(new WebhookEvent { Payload = request.Body });\n+        await db.SaveChangesAsync();\n+    }\n+}\n"
+        },
+        {
+          "path": "src/workers/RefundWorker.cs",
+          "changeType": "added",
+          "addedLines": 22,
+          "deletedLines": 0,
+          "rawDiff": "diff --git a/src/workers/RefundWorker.cs b/src/workers/RefundWorker.cs\nnew file mode 100644\nindex 0000000..3d3d3d3\n--- /dev/null\n+++ b/src/workers/RefundWorker.cs\n@@ -0,0 +1,12 @@\n+public class RefundWorker {\n+    public async Task RunAsync() {\n+        await queue.PublishAsync(\"refunds\");\n+        await Task.Delay(1500);\n+        await httpClient.PostAsync(\"https://api.stripe.com/refund\", payload);\n+        await mailer.SendAsync(\"refund started\");\n+    }\n+}\n"
+        },
+        {
+          "path": "src/services/InvoiceService.cs",
+          "changeType": "added",
+          "addedLines": 18,
+          "deletedLines": 0,
+          "rawDiff": "diff --git a/src/services/InvoiceService.cs b/src/services/InvoiceService.cs\nnew file mode 100644\nindex 0000000..4e4e4e4\n--- /dev/null\n+++ b/src/services/InvoiceService.cs\n@@ -0,0 +1,10 @@\n+public class InvoiceService {\n+    public Invoice Create(decimal amount, string email) {\n+        var tax = taxCalculator.Calculate(amount);\n+        return new Invoice { Amount = amount, Tax = tax, Email = email };\n+    }\n+}\n"
+        },
+        {
+          "path": "src/data/migrations/20260125_add_invoice_status.sql",
+          "changeType": "added",
+          "addedLines": 6,
+          "deletedLines": 0,
+          "rawDiff": "diff --git a/src/data/migrations/20260125_add_invoice_status.sql b/src/data/migrations/20260125_add_invoice_status.sql\nnew file mode 100644\nindex 0000000..5f5f5f5\n--- /dev/null\n+++ b/src/data/migrations/20260125_add_invoice_status.sql\n@@ -0,0 +1,4 @@\n+ALTER TABLE invoices ADD COLUMN status text;\n+CREATE INDEX idx_invoices_status ON invoices(status);\n+UPDATE invoices SET status = 'open' WHERE status IS NULL;\n"
+        },
+        {
+          "path": "src/config/routes.yaml",
+          "changeType": "modified",
+          "addedLines": 6,
+          "deletedLines": 1,
+          "rawDiff": "diff --git a/src/config/routes.yaml b/src/config/routes.yaml\nindex 6a6a6a6..7b7b7b7 100644\n--- a/src/config/routes.yaml\n+++ b/src/config/routes.yaml\n@@ -1,3 +1,8 @@\n routes:\n-  - path: /payments\n+  - path: /payments\n+  - path: /payments/refunds\n+  - path: /webhooks/stripe\n+  - path: /invoices\n"
+        }
+      ]
+    },
+    {
+      "owner": "luna",
+      "name": "ops-console",
+      "prNumber": 233,
+      "baseSha": "base-console",
+      "headSha": "head-console",
+      "defaultBranch": "main",
+      "title": "Add billing console reconciliation",
+      "source": "fixture",
+      "ingestedAt": "2026-01-27T14:30:00Z",
+      "fileChanges": [
+        {
+          "path": "src/server/routes/billing.ts",
+          "changeType": "modified",
+          "addedLines": 28,
+          "deletedLines": 6,
+          "rawDiff": "diff --git a/src/server/routes/billing.ts b/src/server/routes/billing.ts\nindex 1a1a1a1..2b2b2b2 100644\n--- a/src/server/routes/billing.ts\n+++ b/src/server/routes/billing.ts\n@@ -6,10 +6,32 @@ export const billingRouter = Router();\n-billingRouter.get('/invoices', async (req, res) => {\n-  return res.json({ invoices: [] });\n-});\n+router.post('/invoices/reconcile', async (req, res) => {\n+  const token = req.headers.authorization;\n+  if (!token) {\n+    audit.log('billing-reconcile-denied', req.user?.id);\n+    return res.status(401).send('unauthorized');\n+  }\n+  const payload = await paymentsClient.fetchInvoices(req.body.accountId);\n+  await db.invoiceReconciliations.insert({ accountId: req.body.accountId, payload });\n+  await queue.publish('billing.reconcile', payload);\n+  return res.json({ status: 'queued' });\n+});\n"
+        },
+        {
+          "path": "src/jobs/reconcile.ts",
+          "changeType": "added",
+          "addedLines": 24,
+          "deletedLines": 0,
+          "rawDiff": "diff --git a/src/jobs/reconcile.ts b/src/jobs/reconcile.ts\nnew file mode 100644\nindex 0000000..3c3c3c3\n--- /dev/null\n+++ b/src/jobs/reconcile.ts\n@@ -0,0 +1,12 @@\n+export async function reconcileJob() {\n+  const invoices = await billingApi.fetchPending();\n+  for (const invoice of invoices) {\n+    await db.invoiceReconciliations.update(invoice.id, { status: 'processing' });\n+    await fetch('https://api.stripe.com/charge', { method: 'POST' });\n+  }\n+}\n"
+        },
+        {
+          "path": "src/lib/audit.ts",
+          "changeType": "modified",
+          "addedLines": 12,
+          "deletedLines": 3,
+          "rawDiff": "diff --git a/src/lib/audit.ts b/src/lib/audit.ts\nindex 4d4d4d4..5e5e5e5 100644\n--- a/src/lib/audit.ts\n+++ b/src/lib/audit.ts\n@@ -4,6 +4,15 @@ export const audit = {\n-  log: (event: string) => logger.info(event),\n+  log: (event: string, userId?: string) => {\n+    logger.info(event, { userId });\n+    metrics.increment('audit.event');\n+  },\n };\n"
+        },
+        {
+          "path": "src/server/middleware/auth.ts",
+          "changeType": "modified",
+          "addedLines": 14,
+          "deletedLines": 2,
+          "rawDiff": "diff --git a/src/server/middleware/auth.ts b/src/server/middleware/auth.ts\nindex 6f6f6f6..7a7a7a7 100644\n--- a/src/server/middleware/auth.ts\n+++ b/src/server/middleware/auth.ts\n@@ -9,6 +9,18 @@ export async function auth(req, res, next) {\n-  return next();\n+  const token = req.headers.authorization;\n+  if (!token) {\n+    return res.status(401).send('missing token');\n+  }\n+  const user = await authClient.verify(token);\n+  req.user = user;\n+  return next();\n }\n"
+        }
+      ]
+    },
+    {
+      "owner": "orbit",
+      "name": "fulfillment",
+      "prNumber": 78,
+      "baseSha": "base-fulfillment",
+      "headSha": "head-fulfillment",
+      "defaultBranch": "main",
+      "title": "Fulfillment retry pipeline + exports",
+      "source": "fixture",
+      "ingestedAt": "2026-01-29T16:45:00Z",
+      "fileChanges": [
+        {
+          "path": "src/shipping/ShipmentController.cs",
+          "changeType": "modified",
+          "addedLines": 26,
+          "deletedLines": 7,
+          "rawDiff": "diff --git a/src/shipping/ShipmentController.cs b/src/shipping/ShipmentController.cs\nindex 8a8a8a8..9b9b9b9 100644\n--- a/src/shipping/ShipmentController.cs\n+++ b/src/shipping/ShipmentController.cs\n@@ -7,8 +7,30 @@ public class ShipmentController {\n-    return Ok();\n+    var token = request.Headers[\"Authorization\"];\n+    if (string.IsNullOrEmpty(token)) {\n+        return Unauthorized();\n+    }\n+    await db.Shipments.AddAsync(new Shipment { OrderId = request.OrderId });\n+    await db.SaveChangesAsync();\n+    await httpClient.PostAsync(\"https://api.shippo.com/shipments\", payload);\n+    await queue.PublishAsync(\"fulfillment.dispatch\", request.OrderId);\n+    return Ok(new { status = \"queued\" });\n }\n"
+        },
+        {
+          "path": "src/workers/FulfillmentRetryWorker.cs",
+          "changeType": "added",
+          "addedLines": 22,
+          "deletedLines": 0,
+          "rawDiff": "diff --git a/src/workers/FulfillmentRetryWorker.cs b/src/workers/FulfillmentRetryWorker.cs\nnew file mode 100644\nindex 0000000..aaaaaaa\n--- /dev/null\n+++ b/src/workers/FulfillmentRetryWorker.cs\n@@ -0,0 +1,12 @@\n+public class FulfillmentRetryWorker {\n+    public async Task RunAsync() {\n+        await queue.PublishAsync(\"fulfillment.retry\");\n+        await Task.Delay(2000);\n+        await httpClient.PostAsync(\"https://api.shippo.com/shipments\", payload);\n+    }\n+}\n"
+        },
+        {
+          "path": "src/files/Exporter.cs",
+          "changeType": "modified",
+          "addedLines": 16,
+          "deletedLines": 2,
+          "rawDiff": "diff --git a/src/files/Exporter.cs b/src/files/Exporter.cs\nindex bbbbbb1..cccccc2 100644\n--- a/src/files/Exporter.cs\n+++ b/src/files/Exporter.cs\n@@ -4,6 +4,16 @@ public class Exporter {\n-    return file;\n+    await fs.WriteAllTextAsync(\"/tmp/shipments.csv\", csv);\n+    await s3Client.PutObjectAsync(\"exports\", \"/tmp/shipments.csv\");\n+    await notifier.SendAsync(\"export.ready\", \"shipments.csv\");\n+    return file;\n }\n"
+        },
+        {
+          "path": "src/data/migrations/20260129_add_tracking.sql",
+          "changeType": "added",
+          "addedLines": 6,
+          "deletedLines": 0,
+          "rawDiff": "diff --git a/src/data/migrations/20260129_add_tracking.sql b/src/data/migrations/20260129_add_tracking.sql\nnew file mode 100644\nindex 0000000..dddddd3\n--- /dev/null\n+++ b/src/data/migrations/20260129_add_tracking.sql\n@@ -0,0 +1,4 @@\n+ALTER TABLE shipments ADD COLUMN tracking_number text;\n+CREATE INDEX idx_shipments_tracking ON shipments(tracking_number);\n"
+        }
+      ]
+    }
+  ]
+}

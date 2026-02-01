@@ -1,0 +1,30 @@
+name: Deploy to Render
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy (API)
+        env:
+          RENDER_DEPLOY_HOOK_URL_API: ${{ secrets.RENDER_DEPLOY_HOOK_URL_API }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL_API" ]; then
+            echo "Missing RENDER_DEPLOY_HOOK_URL_API secret."
+            exit 1
+          fi
+          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL_API"
+      - name: Trigger Render deploy (Frontend)
+        env:
+          RENDER_DEPLOY_HOOK_URL_FRONTEND: ${{ secrets.RENDER_DEPLOY_HOOK_URL_FRONTEND }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL_FRONTEND" ]; then
+            echo "Missing RENDER_DEPLOY_HOOK_URL_FRONTEND secret."
+            exit 1
+          fi
+          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK_URL_FRONTEND"
