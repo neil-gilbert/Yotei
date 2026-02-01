@@ -88,6 +88,7 @@ applyTo: '**/*.cs'
 ## Testing
 
 - Always include test cases for critical paths of the application.
+- Run the relevant build and test commands before completing work; if they cannot run, explain why.
 - Guide users through creating unit tests.
 - Do not emit "Act", "Arrange" or "Assert" comments.
 - Copy existing style in nearby files for test method names and capitalization.

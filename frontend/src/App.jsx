@@ -2564,6 +2564,8 @@ GitHub__App__WebhookSecret=...`}</pre>
         </button>
         <div className="voice-mascot__hint">Ask about this PR</div>
       </div>
+        </>
+      )}
     </div>
   );
 }
