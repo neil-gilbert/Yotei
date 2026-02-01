@@ -3,7 +3,7 @@ databases:
     databaseName: yotei
     user: yotei
     region: frankfurt
-    plan: starter
+    plan: basic-256mb
     postgresMajorVersion: 16
 
 services:
