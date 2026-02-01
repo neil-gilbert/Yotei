@@ -3,7 +3,7 @@ databases:
     databaseName: yotei
     user: yotei
     region: frankfurt
-    plan: basic-256mb
+    plan: free
     postgresMajorVersion: 16
 
 services:
@@ -11,7 +11,7 @@ services:
     name: yotei-api
     runtime: docker
     region: frankfurt
-    plan: starter
+    plan: free
     dockerContext: .
     dockerfilePath: backend/src/Api/Dockerfile
     healthCheckPath: /health
