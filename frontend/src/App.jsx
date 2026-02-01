@@ -81,6 +81,9 @@ export default function App() {
   const [copiedLabel, setCopiedLabel] = useState("");
   const recognitionRef = useRef(null);
   const normalizedApiBase = useMemo(() => apiBase.replace(/\/+$/, ""), [apiBase]);
+  const setupMode = import.meta.env.VITE_SETUP_MODE ?? "customer";
+  const installUrl = import.meta.env.VITE_GITHUB_APP_INSTALL_URL ?? "";
+  const isAdminSetup = setupMode.toLowerCase() === "admin";
   const webhookUrl = `${normalizedApiBase}/ingest/github/webhook`;
   const ingestUrl = `${normalizedApiBase}/ingest/github`;
   const syncUrl = `${normalizedApiBase}/ingest/github/sync`;
@@ -1307,6 +1310,23 @@ export default function App() {
               Yotei uses a GitHub App for secure, org-friendly access. Install it once, then let
               webhook events keep review sessions in sync.
             </p>
+            {!isAdminSetup && (
+              <div className="setup__cta">
+                <p>
+                  You do not need Render access. Install the GitHub App and pick the repositories to
+                  monitor.
+                </p>
+                {installUrl ? (
+                  <a className="button" href={installUrl} target="_blank" rel="noreferrer">
+                    Install GitHub App
+                  </a>
+                ) : (
+                  <div className="setup__callout">
+                    Ask your Yotei admin for the GitHub App install link.
+                  </div>
+                )}
+              </div>
+            )}
             <div className="setup__pill-row">
               <div className="setup__pill">
                 <span>Webhook</span>
@@ -1359,14 +1379,28 @@ export default function App() {
             <div className="setup__step-header">
               <span className="setup__step-index">01</span>
               <div>
-                <h3>Create the GitHub App</h3>
-                <p>Give Yotei read access to pull requests.</p>
+                <h3>{isAdminSetup ? "Create the GitHub App" : "Install the GitHub App"}</h3>
+                <p>
+                  {isAdminSetup
+                    ? "Give Yotei read access to pull requests."
+                    : "Authorize access to the repos you want to monitor."}
+                </p>
               </div>
             </div>
             <ul className="setup__list">
-              <li>Permissions: Contents (read), Pull requests (read).</li>
-              <li>Subscribe to pull_request events.</li>
-              <li>Generate a private key for the app.</li>
+              {isAdminSetup ? (
+                <>
+                  <li>Permissions: Contents (read), Pull requests (read).</li>
+                  <li>Subscribe to pull_request events.</li>
+                  <li>Generate a private key for the app.</li>
+                </>
+              ) : (
+                <>
+                  <li>Select the repos you want Yotei to watch.</li>
+                  <li>Confirm the installation for your org.</li>
+                  <li>Open or update a PR to trigger ingestion.</li>
+                </>
+              )}
             </ul>
           </article>
 
@@ -1374,57 +1408,88 @@ export default function App() {
             <div className="setup__step-header">
               <span className="setup__step-index">02</span>
               <div>
-                <h3>Install on a repo or org</h3>
-                <p>Choose which repos Yotei should watch.</p>
+                <h3>{isAdminSetup ? "Install on a repo or org" : "Confirm the install"}</h3>
+                <p>
+                  {isAdminSetup
+                    ? "Choose which repos Yotei should watch."
+                    : "Keep the installation connected for ongoing sync."}
+                </p>
               </div>
             </div>
             <ul className="setup__list">
-              <li>Copy the Installation ID from the install screen.</li>
-              <li>Keep the App ID and private key handy.</li>
+              {isAdminSetup ? (
+                <>
+                  <li>Copy the Installation ID from the install screen.</li>
+                  <li>Keep the App ID and private key handy.</li>
+                </>
+              ) : (
+                <>
+                  <li>Make sure the app is installed on the right repos.</li>
+                  <li>Let your admin know if anything looks missing.</li>
+                </>
+              )}
             </ul>
           </article>
 
-          <article className="card setup__step" style={{ "--delay": "0.15s" }}>
-            <div className="setup__step-header">
-              <span className="setup__step-index">03</span>
-              <div>
-                <h3>Set Render environment</h3>
-                <p>Use PEM or base64 for the private key.</p>
-              </div>
-            </div>
-            <pre className="setup__code">{`GitHub__App__AppId=...
+          {isAdminSetup ? (
+            <>
+              <article className="card setup__step" style={{ "--delay": "0.15s" }}>
+                <div className="setup__step-header">
+                  <span className="setup__step-index">03</span>
+                  <div>
+                    <h3>Set environment variables</h3>
+                    <p>Use PEM or base64 for the private key.</p>
+                  </div>
+                </div>
+                <pre className="setup__code">{`GitHub__App__AppId=...
 GitHub__App__InstallationId=...
 GitHub__App__PrivateKey=...
 GitHub__App__WebhookSecret=...`}</pre>
-            <div className="setup__code-actions">
-              <button
-                className="button ghost"
-                onClick={() =>
-                  handleCopy(
-                    `GitHub__App__AppId=\nGitHub__App__InstallationId=\nGitHub__App__PrivateKey=\nGitHub__App__WebhookSecret=`,
-                    "env"
-                  )
-                }
-              >
-                {copiedLabel === "env" ? "Copied" : "Copy template"}
-              </button>
-            </div>
-          </article>
+                <div className="setup__code-actions">
+                  <button
+                    className="button ghost"
+                    onClick={() =>
+                      handleCopy(
+                        `GitHub__App__AppId=\nGitHub__App__InstallationId=\nGitHub__App__PrivateKey=\nGitHub__App__WebhookSecret=`,
+                        "env"
+                      )
+                    }
+                  >
+                    {copiedLabel === "env" ? "Copied" : "Copy template"}
+                  </button>
+                </div>
+              </article>
 
-          <article className="card setup__step" style={{ "--delay": "0.2s" }}>
-            <div className="setup__step-header">
-              <span className="setup__step-index">04</span>
-              <div>
-                <h3>Configure the webhook</h3>
-                <p>Point GitHub to the ingestion endpoint.</p>
+              <article className="card setup__step" style={{ "--delay": "0.2s" }}>
+                <div className="setup__step-header">
+                  <span className="setup__step-index">04</span>
+                  <div>
+                    <h3>Configure the webhook</h3>
+                    <p>Point GitHub to the ingestion endpoint.</p>
+                  </div>
+                </div>
+                <ul className="setup__list">
+                  <li>Webhook URL: {webhookUrl}</li>
+                  <li>Content type: application/json</li>
+                  <li>Secret: same as GitHub__App__WebhookSecret</li>
+                </ul>
+              </article>
+            </>
+          ) : (
+            <article className="card setup__step" style={{ "--delay": "0.15s" }}>
+              <div className="setup__step-header">
+                <span className="setup__step-index">03</span>
+                <div>
+                  <h3>Open a pull request</h3>
+                  <p>Yotei will ingest the PR automatically.</p>
+                </div>
               </div>
-            </div>
-            <ul className="setup__list">
-              <li>Webhook URL: {webhookUrl}</li>
-              <li>Content type: application/json</li>
-              <li>Secret: same as GitHub__App__WebhookSecret</li>
-            </ul>
-          </article>
+              <ul className="setup__list">
+                <li>Push commits to your PR to trigger sync.</li>
+                <li>Refresh the dashboard to see the session.</li>
+              </ul>
+            </article>
+          )}
         </div>
 
         <div className="setup__footer card">
@@ -1432,25 +1497,36 @@ GitHub__App__WebhookSecret=...`}</pre>
             <h3>Test it fast</h3>
             <p>Open or update a PR, then watch it appear in the review sessions list.</p>
           </div>
-          <div className="setup__footer-actions">
-            <button
-              className="button ghost"
-              onClick={() => handleCopy(`curl -X POST "${syncUrl}"`, "curl-sync")}
-            >
-              {copiedLabel === "curl-sync" ? "Copied" : "Copy sync curl"}
-            </button>
-            <button
-              className="button"
-              onClick={() =>
-                handleCopy(
-                  `curl -X POST "${ingestUrl}" -H "Content-Type: application/json" -d '{"owner":"ORG","name":"REPO","prNumber":123}'`,
-                  "curl-one"
-                )
-              }
-            >
-              {copiedLabel === "curl-one" ? "Copied" : "Copy single PR curl"}
-            </button>
-          </div>
+          {isAdminSetup ? (
+            <div className="setup__footer-actions">
+              <button
+                className="button ghost"
+                onClick={() => handleCopy(`curl -X POST "${syncUrl}"`, "curl-sync")}
+              >
+                {copiedLabel === "curl-sync" ? "Copied" : "Copy sync curl"}
+              </button>
+              <button
+                className="button"
+                onClick={() =>
+                  handleCopy(
+                    `curl -X POST "${ingestUrl}" -H "Content-Type: application/json" -d '{"owner":"ORG","name":"REPO","prNumber":123}'`,
+                    "curl-one"
+                  )
+                }
+              >
+                {copiedLabel === "curl-one" ? "Copied" : "Copy single PR curl"}
+              </button>
+            </div>
+          ) : (
+            <div className="setup__footer-actions">
+              <button
+                className="button ghost"
+                onClick={() => handleCopy(webhookUrl, "webhook")}
+              >
+                {copiedLabel === "webhook" ? "Copied" : "Copy webhook"}
+              </button>
+            </div>
+          )}
         </div>
       </section>
     );

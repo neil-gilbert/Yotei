@@ -264,6 +264,21 @@ body {
   gap: 10px;
 }
 
+.setup__cta {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 18px;
+}
+
+.setup__callout {
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(10, 14, 22, 0.7);
+  border: 1px solid rgba(157, 215, 255, 0.25);
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .setup__grid {
   display: grid;
   gap: 18px;
