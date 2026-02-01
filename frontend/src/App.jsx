@@ -14,6 +14,7 @@ const flowColumnX = {
 };
 
 export default function App() {
+  const [activeView, setActiveView] = useState("dashboard");
   const [snapshots, setSnapshots] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -77,7 +78,25 @@ export default function App() {
   const [changeTypeFilter, setChangeTypeFilter] = useState("");
   const [pathPrefixFilter, setPathPrefixFilter] = useState("");
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
+  const [copiedLabel, setCopiedLabel] = useState("");
   const recognitionRef = useRef(null);
+  const normalizedApiBase = useMemo(() => apiBase.replace(/\/+$/, ""), [apiBase]);
+  const webhookUrl = `${normalizedApiBase}/ingest/github/webhook`;
+  const ingestUrl = `${normalizedApiBase}/ingest/github`;
+  const syncUrl = `${normalizedApiBase}/ingest/github/sync`;
+
+  const handleCopy = async (value, label) => {
+    if (!value) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedLabel(label);
+      setTimeout(() => setCopiedLabel(""), 2000);
+    } catch (err) {
+      setCopiedLabel("failed");
+    }
+  };
 
   const fetchSnapshots = async (nextOffset = offset, nextLimit = limit) => {
     setLoading(true);
@@ -1277,6 +1296,166 @@ export default function App() {
     setSelectedFlowNodeId(node.id);
   };
 
+  const renderSetup = () => {
+    return (
+      <section className="setup">
+        <div className="setup__hero">
+          <div>
+            <span className="setup__eyebrow">GitHub App Setup</span>
+            <h2>Connect repositories once, then ingest every pull request.</h2>
+            <p>
+              Yotei uses a GitHub App for secure, org-friendly access. Install it once, then let
+              webhook events keep review sessions in sync.
+            </p>
+            <div className="setup__pill-row">
+              <div className="setup__pill">
+                <span>Webhook</span>
+                <strong>{webhookUrl}</strong>
+              </div>
+              <div className="setup__pill">
+                <span>API</span>
+                <strong>{normalizedApiBase}</strong>
+              </div>
+            </div>
+          </div>
+          <div className="setup__signal card">
+            <div className="setup__signal-header">
+              <div>
+                <p>Deploy status</p>
+                <h3>Render + GitHub App</h3>
+              </div>
+              <span className="setup__badge">beta</span>
+            </div>
+            <div className="setup__signal-body">
+              <div>
+                <span>Webhook endpoint</span>
+                <strong>{webhookUrl}</strong>
+              </div>
+              <div>
+                <span>Manual ingest</span>
+                <strong>{ingestUrl}</strong>
+              </div>
+              <div>
+                <span>Sync open PRs</span>
+                <strong>{syncUrl}</strong>
+              </div>
+            </div>
+            <div className="setup__signal-actions">
+              <button
+                className="button ghost"
+                onClick={() => handleCopy(webhookUrl, "webhook")}
+              >
+                {copiedLabel === "webhook" ? "Copied" : "Copy webhook"}
+              </button>
+              <a className="button" href={`${normalizedApiBase}/health`} target="_blank" rel="noreferrer">
+                Check API health
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div className="setup__grid">
+          <article className="card setup__step" style={{ "--delay": "0.05s" }}>
+            <div className="setup__step-header">
+              <span className="setup__step-index">01</span>
+              <div>
+                <h3>Create the GitHub App</h3>
+                <p>Give Yotei read access to pull requests.</p>
+              </div>
+            </div>
+            <ul className="setup__list">
+              <li>Permissions: Contents (read), Pull requests (read).</li>
+              <li>Subscribe to pull_request events.</li>
+              <li>Generate a private key for the app.</li>
+            </ul>
+          </article>
+
+          <article className="card setup__step" style={{ "--delay": "0.1s" }}>
+            <div className="setup__step-header">
+              <span className="setup__step-index">02</span>
+              <div>
+                <h3>Install on a repo or org</h3>
+                <p>Choose which repos Yotei should watch.</p>
+              </div>
+            </div>
+            <ul className="setup__list">
+              <li>Copy the Installation ID from the install screen.</li>
+              <li>Keep the App ID and private key handy.</li>
+            </ul>
+          </article>
+
+          <article className="card setup__step" style={{ "--delay": "0.15s" }}>
+            <div className="setup__step-header">
+              <span className="setup__step-index">03</span>
+              <div>
+                <h3>Set Render environment</h3>
+                <p>Use PEM or base64 for the private key.</p>
+              </div>
+            </div>
+            <pre className="setup__code">{`GitHub__App__AppId=...
+GitHub__App__InstallationId=...
+GitHub__App__PrivateKey=...
+GitHub__App__WebhookSecret=...`}</pre>
+            <div className="setup__code-actions">
+              <button
+                className="button ghost"
+                onClick={() =>
+                  handleCopy(
+                    `GitHub__App__AppId=\nGitHub__App__InstallationId=\nGitHub__App__PrivateKey=\nGitHub__App__WebhookSecret=`,
+                    "env"
+                  )
+                }
+              >
+                {copiedLabel === "env" ? "Copied" : "Copy template"}
+              </button>
+            </div>
+          </article>
+
+          <article className="card setup__step" style={{ "--delay": "0.2s" }}>
+            <div className="setup__step-header">
+              <span className="setup__step-index">04</span>
+              <div>
+                <h3>Configure the webhook</h3>
+                <p>Point GitHub to the ingestion endpoint.</p>
+              </div>
+            </div>
+            <ul className="setup__list">
+              <li>Webhook URL: {webhookUrl}</li>
+              <li>Content type: application/json</li>
+              <li>Secret: same as GitHub__App__WebhookSecret</li>
+            </ul>
+          </article>
+        </div>
+
+        <div className="setup__footer card">
+          <div>
+            <h3>Test it fast</h3>
+            <p>Open or update a PR, then watch it appear in the review sessions list.</p>
+          </div>
+          <div className="setup__footer-actions">
+            <button
+              className="button ghost"
+              onClick={() => handleCopy(`curl -X POST "${syncUrl}"`, "curl-sync")}
+            >
+              {copiedLabel === "curl-sync" ? "Copied" : "Copy sync curl"}
+            </button>
+            <button
+              className="button"
+              onClick={() =>
+                handleCopy(
+                  `curl -X POST "${ingestUrl}" -H "Content-Type: application/json" -d '{"owner":"ORG","name":"REPO","prNumber":123}'`,
+                  "curl-one"
+                )
+              }
+            >
+              {copiedLabel === "curl-one" ? "Copied" : "Copy single PR curl"}
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  };
+
   return (
     <div className="app">
       <header className="app__header">
@@ -1285,59 +1464,85 @@ export default function App() {
           <p>Review comprehension for AI-generated changes.</p>
         </div>
         <div className="app__actions">
-          <button className="button ghost" onClick={() => fetchSnapshots()} disabled={loading}>
-            Refresh
-          </button>
-          <button
-            className="button"
-            onClick={buildReview}
-            disabled={buildStatus === "loading" || !selectedId}
-          >
-            {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
-          </button>
+          <div className="view-toggle">
+            <button
+              className={`button ghost ${activeView === "dashboard" ? "button--active" : ""}`}
+              onClick={() => setActiveView("dashboard")}
+            >
+              Dashboard
+            </button>
+            <button
+              className={`button ghost ${activeView === "setup" ? "button--active" : ""}`}
+              onClick={() => setActiveView("setup")}
+            >
+              Setup
+            </button>
+          </div>
+          {activeView === "dashboard" ? (
+            <>
+              <button className="button ghost" onClick={() => fetchSnapshots()} disabled={loading}>
+                Refresh
+              </button>
+              <button
+                className="button"
+                onClick={buildReview}
+                disabled={buildStatus === "loading" || !selectedId}
+              >
+                {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
+              </button>
+            </>
+          ) : (
+            <a className="button ghost" href={normalizedApiBase} target="_blank" rel="noreferrer">
+              Open API
+            </a>
+          )}
         </div>
       </header>
-      {error && <div className="alert">{error}</div>}
-      <main className={`app__content ${sessionsCollapsed ? "app__content--collapsed" : ""}`}>
-        <aside className={`sidebar ${sessionsCollapsed ? "sidebar--collapsed" : ""}`}>
-          <section className={`card sessions ${sessionsCollapsed ? "card--collapsed" : ""}`}>
-            <div className="card__header">
-              <h2>Review Sessions</h2>
-              <div className="card__actions">
-                <button
-                  className="button ghost icon-button"
-                  onClick={() => setSessionsCollapsed((current) => !current)}
-                  aria-label={sessionsCollapsed ? "Expand review sessions" : "Collapse review sessions"}
-                >
-                  {sessionsCollapsed ? (
-                    <svg viewBox="0 0 20 20" aria-hidden="true">
-                      <path
-                        d="M7 4l6 6-6 6"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                      />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 20 20" aria-hidden="true">
-                      <path
-                        d="M4 7l6 6 6-6"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                      />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
-            {!sessionsCollapsed && (
-              <>
-                <div className="pagination">
+      {activeView === "setup" ? (
+        renderSetup()
+      ) : (
+        <>
+          {error && <div className="alert">{error}</div>}
+          <main className={`app__content ${sessionsCollapsed ? "app__content--collapsed" : ""}`}>
+            <aside className={`sidebar ${sessionsCollapsed ? "sidebar--collapsed" : ""}`}>
+              <section className={`card sessions ${sessionsCollapsed ? "card--collapsed" : ""}`}>
+                <div className="card__header">
+                  <h2>Review Sessions</h2>
+                  <div className="card__actions">
+                    <button
+                      className="button ghost icon-button"
+                      onClick={() => setSessionsCollapsed((current) => !current)}
+                      aria-label={sessionsCollapsed ? "Expand review sessions" : "Collapse review sessions"}
+                    >
+                      {sessionsCollapsed ? (
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                          <path
+                            d="M7 4l6 6-6 6"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                          />
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 20 20" aria-hidden="true">
+                          <path
+                            d="M4 7l6 6 6-6"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                {!sessionsCollapsed && (
+                  <>
+                    <div className="pagination">
                   <div className="pager">
                     <button className="button ghost" onClick={handlePrev} disabled={offset === 0}>
                       Prev
