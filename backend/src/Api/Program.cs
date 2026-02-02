@@ -9,6 +9,7 @@ using Yotei.Api.Features.ChangeTree;
 using Yotei.Api.Features.Explanations;
 using Yotei.Api.Features.Flow;
 using Yotei.Api.Features.Insights;
+using Yotei.Api.Features.Tenancy;
 using Yotei.Api.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -54,9 +55,11 @@ var app = builder.Build();
 await app.InitializeAsync();
 
 app.UseCors("Default");
+app.UseMiddleware<TenantResolverMiddleware>();
 
 app.MapHealthEndpoints();
 app.MapIngestionEndpoints();
+app.MapTenantOnboardingEndpoints();
 app.MapSnapshotEndpoints();
 app.MapReviewSessionEndpoints();
 app.MapFileChangeEndpoints();

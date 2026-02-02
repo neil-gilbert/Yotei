@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
+using Yotei.Api.Features.Tenancy;
 
 namespace Yotei.Api.Features.Flow;
 
@@ -17,6 +18,7 @@ public static class FlowEndpoints
     {
         app.MapGet("/review-sessions/{sessionId:guid}/flow", async (
             Guid sessionId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             FlowGraphBuilder builder,
             CancellationToken cancellationToken) =>
@@ -24,7 +26,9 @@ public static class FlowEndpoints
             var session = await db.ReviewSessions
                 .AsNoTracking()
                 .Include(item => item.Nodes)
-                .FirstOrDefaultAsync(item => item.Id == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.Id == sessionId && item.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (session is null)
             {

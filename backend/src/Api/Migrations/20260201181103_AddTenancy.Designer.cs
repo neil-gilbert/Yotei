@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Yotei.Api.Data;
@@ -12,9 +13,11 @@ using Yotei.Api.Data;
 namespace Api.Migrations
 {
     [DbContext(typeof(YoteiDbContext))]
-    partial class YoteiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260201181103_AddTenancy")]
+    partial class AddTenancy
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

@@ -37,6 +37,8 @@ services:
       Storage__SecretKey: test
       Storage__Region: us-east-1
       Storage__Provider: Database
+      Frontend__BaseUrl: http://localhost:5173
+      Tenancy__AllowSingleTenantFallback: "true"
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_DEFAULT_REGION: us-east-1
@@ -60,6 +62,8 @@ services:
       dockerfile: frontend/Dockerfile
     environment:
       VITE_API_BASE_URL: http://localhost:8080
+      VITE_GITHUB_APP_INSTALL_URL: ${GITHUB_APP_INSTALL_URL}
+      VITE_SETUP_MODE: ${VITE_SETUP_MODE:-customer}
     ports:
       - "5173:5173"
     depends_on:

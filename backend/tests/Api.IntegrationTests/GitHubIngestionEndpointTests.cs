@@ -77,6 +77,7 @@ public class GitHubIngestionEndpointTests
 
     private sealed class GitHubApiFactory : WebApplicationFactory<Program>
     {
+        private const string TenantToken = "test-tenant-token";
         private readonly string _databaseName = $"yotei-tests-{Guid.NewGuid()}";
         private readonly InMemoryDatabaseRoot _databaseRoot = new();
         private readonly ServiceProvider _internalProvider = new ServiceCollection()
@@ -87,6 +88,12 @@ public class GitHubIngestionEndpointTests
         public GitHubApiFactory(string[]? repos = null)
         {
             _repos = repos ?? [];
+        }
+
+        // Adds the test tenant header to all requests.
+        protected override void ConfigureClient(HttpClient client)
+        {
+            client.DefaultRequestHeaders.Add("X-Tenant-Token", TenantToken);
         }
 
         // Configures the test host with a stubbed GitHub API client.
@@ -128,6 +135,21 @@ public class GitHubIngestionEndpointTests
                 services.RemoveAll<IGithubIngestionService>();
                 services.AddHttpClient<IGithubIngestionService, GithubIngestionService>()
                     .ConfigurePrimaryHttpMessageHandler(() => new StubGitHubHandler());
+
+                using var provider = services.BuildServiceProvider();
+                using var scope = provider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<YoteiDbContext>();
+                db.Database.EnsureCreated();
+                if (!db.Tenants.Any())
+                {
+                    db.Tenants.Add(new Yotei.Api.Models.Tenant
+                    {
+                        Name = "Test Tenant",
+                        Slug = "test-tenant",
+                        Token = TenantToken
+                    });
+                    db.SaveChanges();
+                }
             });
         }
     }

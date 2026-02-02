@@ -279,6 +279,34 @@ body {
   font-size: 13px;
 }
 
+.setup__callout--success {
+  border-color: rgba(120, 210, 160, 0.45);
+  color: #daf6e7;
+}
+
+.setup__callout--warning {
+  border-color: rgba(255, 195, 110, 0.45);
+  color: #f7e7c5;
+}
+
+.setup__token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setup__token-row strong {
+  display: block;
+  font-size: 14px;
+  color: #f4f1ea;
+}
+
+.setup__token-row p {
+  margin: 6px 0 0;
+}
+
 .setup__grid {
   display: grid;
   gap: 18px;

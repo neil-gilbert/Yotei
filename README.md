@@ -54,9 +54,22 @@ For production-style usage, configure a GitHub App instead of PATs.
 1) Create a GitHub App and install it on the repo or org.
 2) Set the app credentials (see `.env.example`):
    - `GITHUB_APP_ID`
-   - `GITHUB_APP_INSTALLATION_ID`
    - `GITHUB_APP_PRIVATE_KEY` (PEM or base64-encoded PEM)
    - `GITHUB_APP_WEBHOOK_SECRET`
-3) Add a webhook pointing to `/ingest/github/webhook`.
+3) Configure the GitHub App webhook to point at `/ingest/github/webhook`.
+4) Configure the GitHub App setup callback URL to point at `/github/install`.
+5) Ensure `Frontend__BaseUrl` is set so the callback can redirect back to the UI.
+6) Set `GITHUB_APP_INSTALL_URL` (or `VITE_GITHUB_APP_INSTALL_URL`) so the setup page can link to the app install screen.
+   - Example: https://github.com/apps/<app-slug>/installations/new
 
 The API will automatically ingest PRs on `opened`, `reopened`, `synchronize`, and `ready_for_review`.
+
+## Tenant access tokens
+
+The API is multi-tenant. Each request from the UI must include the tenant token:
+
+- Header: `X-Tenant-Token: <token>`
+- The `/github/install` callback will redirect to the frontend with `?tenant=<token>`.
+
+For local development with fixtures, you can enable `Tenancy__AllowSingleTenantFallback=true`
+to auto-select the only tenant in the database.

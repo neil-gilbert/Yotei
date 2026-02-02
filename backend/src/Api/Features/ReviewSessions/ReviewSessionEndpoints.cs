@@ -4,6 +4,7 @@ using Yotei.Api.Data;
 using Yotei.Api.Infrastructure;
 using Yotei.Api.Models;
 using Yotei.Api.Storage;
+using Yotei.Api.Features.Tenancy;
 
 namespace Yotei.Api.Features.ReviewSessions;
 
@@ -17,7 +18,11 @@ public static class ReviewSessionEndpoints
     public static IEndpointRouteBuilder MapReviewSessionEndpoints(this IEndpointRouteBuilder app)
     {
         // List review sessions mapped from snapshots with pagination.
-        app.MapGet("/review-sessions", async (int? limit, int? offset, YoteiDbContext db) =>
+        app.MapGet("/review-sessions", async (
+            int? limit,
+            int? offset,
+            TenantContext tenantContext,
+            YoteiDbContext db) =>
         {
             var resolvedLimit = limit ?? 10;
             var resolvedOffset = offset ?? 0;
@@ -41,6 +46,7 @@ public static class ReviewSessionEndpoints
             var sessions = await db.PullRequestSnapshots
                 .AsNoTracking()
                 .Include(snapshot => snapshot.Repository)
+                .Where(snapshot => snapshot.TenantId == tenantContext.TenantId)
                 .OrderByDescending(snapshot => snapshot.IngestedAt)
                 .Skip(resolvedOffset)
                 .Take(resolvedLimit)
@@ -59,12 +65,15 @@ public static class ReviewSessionEndpoints
         });
 
         // Fetch a single review session backed by a snapshot id.
-        app.MapGet("/review-sessions/{sessionId:guid}", async (Guid sessionId, YoteiDbContext db) =>
+        app.MapGet("/review-sessions/{sessionId:guid}", async (
+            Guid sessionId,
+            TenantContext tenantContext,
+            YoteiDbContext db) =>
         {
             var snapshot = await db.PullRequestSnapshots
                 .AsNoTracking()
                 .Include(s => s.Repository)
-                .FirstOrDefaultAsync(s => s.Id == sessionId);
+                .FirstOrDefaultAsync(s => s.Id == sessionId && s.TenantId == tenantContext.TenantId);
 
             if (snapshot is null)
             {
@@ -89,6 +98,7 @@ public static class ReviewSessionEndpoints
         // Build or rebuild the review summary, tree, and explanations.
         app.MapPost("/review-sessions/{sessionId:guid}/build", async (
             Guid sessionId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             IRawDiffStorage storage,
             ReviewTreeBuilder builder,
@@ -102,7 +112,9 @@ public static class ReviewSessionEndpoints
             var snapshot = await db.PullRequestSnapshots
                 .Include(s => s.FileChanges)
                 .Include(s => s.Repository)
-                .FirstOrDefaultAsync(s => s.Id == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    s => s.Id == sessionId && s.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (snapshot is null)
             {
@@ -112,7 +124,10 @@ public static class ReviewSessionEndpoints
             var existingSession = await db.ReviewSessions
                 .Include(session => session.Nodes)
                 .Include(session => session.Summary)
-                .FirstOrDefaultAsync(session => session.PullRequestSnapshotId == snapshot.Id, cancellationToken);
+                .FirstOrDefaultAsync(
+                    session => session.PullRequestSnapshotId == snapshot.Id &&
+                        session.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             ReviewSession session;
             if (existingSession is null)
@@ -120,6 +135,7 @@ public static class ReviewSessionEndpoints
                 session = new ReviewSession
                 {
                     Id = snapshot.Id,
+                    TenantId = tenantContext.TenantId,
                     PullRequestSnapshotId = snapshot.Id
                 };
 
@@ -128,6 +144,11 @@ public static class ReviewSessionEndpoints
             else
             {
                 session = existingSession;
+
+                if (session.TenantId == Guid.Empty)
+                {
+                    session.TenantId = tenantContext.TenantId;
+                }
 
                 if (session.Nodes.Count > 0)
                 {
@@ -211,12 +232,17 @@ public static class ReviewSessionEndpoints
         // Fetch the persisted review summary for a session.
         app.MapGet("/review-sessions/{sessionId:guid}/summary", async (
             Guid sessionId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
             var summary = await db.ReviewSummaries
                 .AsNoTracking()
-                .FirstOrDefaultAsync(item => item.ReviewSessionId == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.ReviewSessionId == sessionId &&
+                        item.ReviewSession != null &&
+                        item.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (summary is null)
             {
@@ -243,13 +269,16 @@ public static class ReviewSessionEndpoints
         // Fetch the review tree for a session.
         app.MapGet("/review-sessions/{sessionId:guid}/change-tree", async (
             Guid sessionId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
             var session = await db.ReviewSessions
                 .AsNoTracking()
                 .Include(item => item.Nodes)
-                .FirstOrDefaultAsync(item => item.Id == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.Id == sessionId && item.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (session is null)
             {
@@ -277,12 +306,18 @@ public static class ReviewSessionEndpoints
         // Fetch explanation for a review node.
         app.MapGet("/review-nodes/{nodeId:guid}/explanation", async (
             Guid nodeId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
             var explanation = await db.ReviewNodeExplanations
                 .AsNoTracking()
-                .FirstOrDefaultAsync(item => item.ReviewNodeId == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.ReviewNodeId == nodeId &&
+                        item.ReviewNode != null &&
+                        item.ReviewNode.ReviewSession != null &&
+                        item.ReviewNode.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (explanation is null)
             {
@@ -301,12 +336,18 @@ public static class ReviewSessionEndpoints
         // Fetch behaviour summary for a file review node.
         app.MapGet("/review-nodes/{nodeId:guid}/behaviour-summary", async (
             Guid nodeId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
             var summary = await db.ReviewNodeBehaviourSummaries
                 .AsNoTracking()
-                .FirstOrDefaultAsync(item => item.ReviewNodeId == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.ReviewNodeId == nodeId &&
+                        item.ReviewNode != null &&
+                        item.ReviewNode.ReviewSession != null &&
+                        item.ReviewNode.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (summary is null)
             {
@@ -326,13 +367,19 @@ public static class ReviewSessionEndpoints
         // Fetch checklist for a review node.
         app.MapGet("/review-nodes/{nodeId:guid}/checklist", async (
             Guid nodeId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
             var checklist = await db.ReviewNodeChecklists
                 .AsNoTracking()
                 .Include(item => item.ItemsDetailed)
-                .FirstOrDefaultAsync(item => item.ReviewNodeId == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.ReviewNodeId == nodeId &&
+                        item.ReviewNode != null &&
+                        item.ReviewNode.ReviewSession != null &&
+                        item.ReviewNode.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (checklist is null)
             {
@@ -360,6 +407,7 @@ public static class ReviewSessionEndpoints
         app.MapPost("/review-nodes/{nodeId:guid}/checklist/items", async (
             Guid nodeId,
             ReviewChecklistItemCreateRequest request,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
@@ -375,7 +423,12 @@ public static class ReviewSessionEndpoints
 
             var checklist = await db.ReviewNodeChecklists
                 .Include(item => item.ItemsDetailed)
-                .FirstOrDefaultAsync(item => item.ReviewNodeId == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.ReviewNodeId == nodeId &&
+                        item.ReviewNode != null &&
+                        item.ReviewNode.ReviewSession != null &&
+                        item.ReviewNode.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (checklist is null)
             {
@@ -422,6 +475,7 @@ public static class ReviewSessionEndpoints
         app.MapPost("/review-nodes/{nodeId:guid}/voice-query", async (
             Guid nodeId,
             ReviewVoiceQueryRequest request,
+            TenantContext tenantContext,
             YoteiDbContext db,
             ReviewVoiceQueryGenerator generator,
             CancellationToken cancellationToken) =>
@@ -442,7 +496,10 @@ public static class ReviewSessionEndpoints
 
             var node = await db.ReviewNodes
                 .AsNoTracking()
-                .FirstOrDefaultAsync(item => item.Id == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.Id == nodeId && item.ReviewSession != null &&
+                        item.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (node is null)
             {
@@ -475,9 +532,21 @@ public static class ReviewSessionEndpoints
         // Fetch transcript entries for a review session.
         app.MapGet("/review-sessions/{sessionId:guid}/transcript", async (
             Guid sessionId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
+            var sessionExists = await db.ReviewSessions
+                .AsNoTracking()
+                .AnyAsync(
+                    session => session.Id == sessionId && session.TenantId == tenantContext.TenantId,
+                    cancellationToken);
+
+            if (!sessionExists)
+            {
+                return Results.NotFound(new { error = "review session not found" });
+            }
+
             var entries = await db.ReviewTranscripts
                 .AsNoTracking()
                 .Where(item => item.ReviewSessionId == sessionId)
@@ -499,13 +568,16 @@ public static class ReviewSessionEndpoints
         // Fetch a compliance report for a review session.
         app.MapGet("/review-sessions/{sessionId:guid}/compliance-report", async (
             Guid sessionId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
             var snapshot = await db.PullRequestSnapshots
                 .AsNoTracking()
                 .Include(item => item.Repository)
-                .FirstOrDefaultAsync(item => item.Id == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.Id == sessionId && item.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (snapshot is null)
             {
@@ -521,7 +593,11 @@ public static class ReviewSessionEndpoints
 
             var summary = await db.ReviewSummaries
                 .AsNoTracking()
-                .FirstOrDefaultAsync(item => item.ReviewSessionId == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.ReviewSessionId == sessionId &&
+                        item.ReviewSession != null &&
+                        item.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (summary is null)
             {
@@ -530,13 +606,20 @@ public static class ReviewSessionEndpoints
 
             var nodeIds = await db.ReviewNodes
                 .AsNoTracking()
-                .Where(node => node.ReviewSessionId == sessionId)
+                .Where(node =>
+                    node.ReviewSessionId == sessionId &&
+                    node.ReviewSession != null &&
+                    node.ReviewSession.TenantId == tenantContext.TenantId)
                 .Select(node => node.Id)
                 .ToListAsync(cancellationToken);
 
             var fileNodeCount = await db.ReviewNodes
                 .AsNoTracking()
-                .Where(node => node.ReviewSessionId == sessionId && node.NodeType == "file")
+                .Where(node =>
+                    node.ReviewSessionId == sessionId &&
+                    node.NodeType == "file" &&
+                    node.ReviewSession != null &&
+                    node.ReviewSession.TenantId == tenantContext.TenantId)
                 .CountAsync(cancellationToken);
 
             var checklists = nodeIds.Count > 0
@@ -599,6 +682,7 @@ public static class ReviewSessionEndpoints
         app.MapGet("/review-sessions/{sessionId:guid}/transcript/export", async (
             Guid sessionId,
             string? format,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
@@ -609,6 +693,17 @@ public static class ReviewSessionEndpoints
             if (resolvedFormat is not ("json" or "csv"))
             {
                 return Results.BadRequest(new { error = "format must be json or csv" });
+            }
+
+            var sessionExists = await db.ReviewSessions
+                .AsNoTracking()
+                .AnyAsync(
+                    session => session.Id == sessionId && session.TenantId == tenantContext.TenantId,
+                    cancellationToken);
+
+            if (!sessionExists)
+            {
+                return Results.NotFound(new { error = "review session not found" });
             }
 
             var entries = await db.ReviewTranscripts
@@ -639,12 +734,18 @@ public static class ReviewSessionEndpoints
         // Fetch the reviewer questions for a node.
         app.MapGet("/review-nodes/{nodeId:guid}/questions", async (
             Guid nodeId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
             var questions = await db.ReviewNodeQuestions
                 .AsNoTracking()
-                .FirstOrDefaultAsync(item => item.ReviewNodeId == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.ReviewNodeId == nodeId &&
+                        item.ReviewNode != null &&
+                        item.ReviewNode.ReviewSession != null &&
+                        item.ReviewNode.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (questions is null)
             {
@@ -663,13 +764,17 @@ public static class ReviewSessionEndpoints
         // Fetch raw diff for a review node.
         app.MapGet("/review-nodes/{nodeId:guid}/diff", async (
             Guid nodeId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             IRawDiffStorage storage,
             CancellationToken cancellationToken) =>
         {
             var node = await db.ReviewNodes
                 .AsNoTracking()
-                .FirstOrDefaultAsync(item => item.Id == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.Id == nodeId && item.ReviewSession != null &&
+                        item.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (node is null)
             {
@@ -685,7 +790,9 @@ public static class ReviewSessionEndpoints
 
             var session = await db.ReviewSessions
                 .AsNoTracking()
-                .FirstOrDefaultAsync(item => item.Id == node.ReviewSessionId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.Id == node.ReviewSessionId && item.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (session is null)
             {
@@ -729,12 +836,16 @@ public static class ReviewSessionEndpoints
         // Regenerate explanation for a review node.
         app.MapPost("/review-nodes/{nodeId:guid}/explanation", async (
             Guid nodeId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             IReviewExplanationGenerator explanationGenerator,
             CancellationToken cancellationToken) =>
         {
             var node = await db.ReviewNodes
-                .FirstOrDefaultAsync(item => item.Id == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.Id == nodeId && item.ReviewSession != null &&
+                        item.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (node is null)
             {
@@ -743,7 +854,12 @@ public static class ReviewSessionEndpoints
 
             var explanation = await explanationGenerator.GenerateAsync(node, cancellationToken);
             var existing = await db.ReviewNodeExplanations
-                .FirstOrDefaultAsync(item => item.ReviewNodeId == nodeId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    item => item.ReviewNodeId == nodeId &&
+                        item.ReviewNode != null &&
+                        item.ReviewNode.ReviewSession != null &&
+                        item.ReviewNode.ReviewSession.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (existing is null)
             {

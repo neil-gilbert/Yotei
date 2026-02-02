@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
 using Yotei.Api.Models;
+using Yotei.Api.Features.Tenancy;
 
 namespace Yotei.Api.Features.FileChanges;
 
@@ -11,6 +12,7 @@ public static class FileChangeEndpoints
         app.MapPost("/snapshots/{snapshotId:guid}/file-changes", async (
             Guid snapshotId,
             FileChangeBatchRequest request,
+            TenantContext tenantContext,
             YoteiDbContext db) =>
         {
             var validationErrors = request.Validate();
@@ -21,7 +23,7 @@ public static class FileChangeEndpoints
 
             var snapshot = await db.PullRequestSnapshots
                 .Include(s => s.FileChanges)
-                .FirstOrDefaultAsync(s => s.Id == snapshotId);
+                .FirstOrDefaultAsync(s => s.Id == snapshotId && s.TenantId == tenantContext.TenantId);
 
             if (snapshot is null)
             {
@@ -70,6 +72,7 @@ public static class FileChangeEndpoints
             Guid snapshotId,
             string? changeType,
             string? pathPrefix,
+            TenantContext tenantContext,
             YoteiDbContext db) =>
         {
             var errors = new List<string>();
@@ -91,7 +94,7 @@ public static class FileChangeEndpoints
             var snapshot = await db.PullRequestSnapshots
                 .AsNoTracking()
                 .Include(s => s.FileChanges)
-                .FirstOrDefaultAsync(s => s.Id == snapshotId);
+                .FirstOrDefaultAsync(s => s.Id == snapshotId && s.TenantId == tenantContext.TenantId);
 
             if (snapshot is null)
             {

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
 using Yotei.Api.Models;
 using Yotei.Api.Storage;
+using Yotei.Api.Features.Tenancy;
 
 namespace Yotei.Api.Features.Storage;
 
@@ -12,6 +13,7 @@ public static class RawDiffEndpoints
         app.MapPost("/snapshots/{snapshotId:guid}/file-changes/upload", async (
             Guid snapshotId,
             RawDiffUploadRequest request,
+            TenantContext tenantContext,
             YoteiDbContext db,
             IRawDiffStorage storage,
             CancellationToken cancellationToken) =>
@@ -24,7 +26,9 @@ public static class RawDiffEndpoints
 
             var snapshot = await db.PullRequestSnapshots
                 .Include(s => s.FileChanges)
-                .FirstOrDefaultAsync(s => s.Id == snapshotId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    s => s.Id == snapshotId && s.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (snapshot is null)
             {
@@ -65,6 +69,7 @@ public static class RawDiffEndpoints
         app.MapGet("/raw-diffs/{snapshotId:guid}", async (
             Guid snapshotId,
             string? path,
+            TenantContext tenantContext,
             YoteiDbContext db,
             IRawDiffStorage storage,
             CancellationToken cancellationToken) =>
@@ -77,7 +82,9 @@ public static class RawDiffEndpoints
             var snapshot = await db.PullRequestSnapshots
                 .AsNoTracking()
                 .Include(s => s.FileChanges)
-                .FirstOrDefaultAsync(s => s.Id == snapshotId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    s => s.Id == snapshotId && s.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (snapshot is null)
             {

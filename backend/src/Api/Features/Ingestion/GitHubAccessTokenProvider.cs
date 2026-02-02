@@ -1,7 +1,5 @@
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 
@@ -16,8 +14,12 @@ public interface IGitHubAccessTokenProvider
     /// Applies authentication headers to an outgoing GitHub API request.
     /// </summary>
     /// <param name="request">The request to authenticate.</param>
+    /// <param name="installationId">The optional installation identifier used for GitHub App auth.</param>
     /// <param name="cancellationToken">Cancellation token for async operations.</param>
-    Task ApplyAuthenticationAsync(HttpRequestMessage request, CancellationToken cancellationToken);
+    Task ApplyAuthenticationAsync(
+        HttpRequestMessage request,
+        long? installationId,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -26,14 +28,12 @@ public interface IGitHubAccessTokenProvider
 public sealed class GitHubAccessTokenProvider : IGitHubAccessTokenProvider
 {
     private static readonly TimeSpan TokenRefreshSkew = TimeSpan.FromMinutes(1);
-    private static readonly TimeSpan AppTokenLifetime = TimeSpan.FromMinutes(9);
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly GitHubSettings _settings;
+    private readonly IGitHubAppJwtFactory _jwtFactory;
     private readonly ILogger<GitHubAccessTokenProvider> _logger;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
-    private string? _cachedToken;
-    private DateTimeOffset _cachedTokenExpiresAt = DateTimeOffset.MinValue;
-    private RSA? _appPrivateKey;
+    private readonly Dictionary<long, InstallationTokenCacheEntry> _tokenCache = [];
 
     /// <summary>
     /// Initializes the provider with configuration and HTTP dependencies.
@@ -44,17 +44,22 @@ public sealed class GitHubAccessTokenProvider : IGitHubAccessTokenProvider
     public GitHubAccessTokenProvider(
         IHttpClientFactory httpClientFactory,
         IOptions<GitHubSettings> settings,
+        IGitHubAppJwtFactory jwtFactory,
         ILogger<GitHubAccessTokenProvider> logger)
     {
         _httpClientFactory = httpClientFactory;
         _settings = settings.Value;
+        _jwtFactory = jwtFactory;
         _logger = logger;
     }
 
     /// <inheritdoc />
-    public async Task ApplyAuthenticationAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    public async Task ApplyAuthenticationAsync(
+        HttpRequestMessage request,
+        long? installationId,
+        CancellationToken cancellationToken)
     {
-        var token = await GetAccessTokenAsync(cancellationToken);
+        var token = await GetAccessTokenAsync(installationId, cancellationToken);
         if (string.IsNullOrWhiteSpace(token))
         {
             return;
@@ -64,11 +69,12 @@ public sealed class GitHubAccessTokenProvider : IGitHubAccessTokenProvider
     }
 
     // Resolves the access token to use for GitHub API requests.
-    private async Task<string?> GetAccessTokenAsync(CancellationToken cancellationToken)
+    private async Task<string?> GetAccessTokenAsync(long? installationId, CancellationToken cancellationToken)
     {
-        if (IsGitHubAppConfigured())
+        var resolvedInstallationId = ResolveInstallationId(installationId);
+        if (IsGitHubAppConfigured() && resolvedInstallationId is > 0)
         {
-            return await GetGitHubAppTokenAsync(cancellationToken);
+            return await GetGitHubAppTokenAsync(resolvedInstallationId.Value, cancellationToken);
         }
 
         if (!string.IsNullOrWhiteSpace(_settings.Token))
@@ -79,39 +85,48 @@ public sealed class GitHubAccessTokenProvider : IGitHubAccessTokenProvider
         return null;
     }
 
+    // Resolves the installation id from request input or configuration.
+    private long? ResolveInstallationId(long? installationId)
+    {
+        if (installationId is > 0)
+        {
+            return installationId;
+        }
+
+        return _settings.App.InstallationId > 0 ? _settings.App.InstallationId : null;
+    }
+
     // Determines whether GitHub App credentials are present.
     private bool IsGitHubAppConfigured()
     {
         return _settings.App.AppId > 0 &&
-            _settings.App.InstallationId > 0 &&
             !string.IsNullOrWhiteSpace(_settings.App.PrivateKey);
     }
 
     // Retrieves or refreshes the GitHub App installation token.
-    private async Task<string?> GetGitHubAppTokenAsync(CancellationToken cancellationToken)
+    private async Task<string?> GetGitHubAppTokenAsync(long installationId, CancellationToken cancellationToken)
     {
-        if (IsCachedTokenValid())
+        if (TryGetCachedToken(installationId, out var cachedToken))
         {
-            return _cachedToken;
+            return cachedToken;
         }
 
         await _refreshLock.WaitAsync(cancellationToken);
         try
         {
-            if (IsCachedTokenValid())
+            if (TryGetCachedToken(installationId, out cachedToken))
             {
-                return _cachedToken;
+                return cachedToken;
             }
 
-            var tokenResponse = await RequestInstallationTokenAsync(cancellationToken);
+            var tokenResponse = await RequestInstallationTokenAsync(installationId, cancellationToken);
             if (tokenResponse is null)
             {
                 return null;
             }
 
-            _cachedToken = tokenResponse.Token;
-            _cachedTokenExpiresAt = tokenResponse.ExpiresAt;
-            return _cachedToken;
+            _tokenCache[installationId] = new InstallationTokenCacheEntry(tokenResponse.Token, tokenResponse.ExpiresAt);
+            return tokenResponse.Token;
         }
         finally
         {
@@ -120,24 +135,37 @@ public sealed class GitHubAccessTokenProvider : IGitHubAccessTokenProvider
     }
 
     // Checks whether the cached token is still valid.
-    private bool IsCachedTokenValid()
+    private bool TryGetCachedToken(long installationId, out string? token)
     {
-        return !string.IsNullOrWhiteSpace(_cachedToken) &&
-            _cachedTokenExpiresAt > DateTimeOffset.UtcNow.Add(TokenRefreshSkew);
+        token = null;
+        if (!_tokenCache.TryGetValue(installationId, out var entry))
+        {
+            return false;
+        }
+
+        if (entry.ExpiresAt <= DateTimeOffset.UtcNow.Add(TokenRefreshSkew))
+        {
+            return false;
+        }
+
+        token = entry.Token;
+        return true;
     }
 
     // Requests a GitHub App installation token from the GitHub API.
-    private async Task<InstallationTokenResponse?> RequestInstallationTokenAsync(CancellationToken cancellationToken)
+    private async Task<InstallationTokenResponse?> RequestInstallationTokenAsync(
+        long installationId,
+        CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient(GitHubHttpClientConfigurator.ClientName);
-        var jwt = CreateAppJwt();
+        var jwt = _jwtFactory.CreateJwt();
         if (string.IsNullOrWhiteSpace(jwt))
         {
             return null;
         }
 
         var request = new HttpRequestMessage(HttpMethod.Post,
-            $"/app/installations/{_settings.App.InstallationId}/access_tokens")
+            $"/app/installations/{installationId}/access_tokens")
         {
             Content = new StringContent("{}", Encoding.UTF8, "application/json")
         };
@@ -157,106 +185,9 @@ public sealed class GitHubAccessTokenProvider : IGitHubAccessTokenProvider
         return tokenResponse;
     }
 
-    // Creates a signed JWT used to authenticate as the GitHub App.
-    private string? CreateAppJwt()
-    {
-        try
-        {
-            var rsa = GetOrCreatePrivateKey();
-            if (rsa is null)
-            {
-                return null;
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            var payload = new Dictionary<string, object>
-            {
-                ["iat"] = now.AddSeconds(-30).ToUnixTimeSeconds(),
-                ["exp"] = now.Add(AppTokenLifetime).ToUnixTimeSeconds(),
-                ["iss"] = _settings.App.AppId
-            };
-
-            var header = new Dictionary<string, object>
-            {
-                ["alg"] = "RS256",
-                ["typ"] = "JWT"
-            };
-
-            var headerBytes = JsonSerializer.SerializeToUtf8Bytes(header);
-            var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
-            var headerEncoded = Base64UrlEncode(headerBytes);
-            var payloadEncoded = Base64UrlEncode(payloadBytes);
-            var unsignedToken = $"{headerEncoded}.{payloadEncoded}";
-
-            var signature = rsa.SignData(
-                Encoding.UTF8.GetBytes(unsignedToken),
-                HashAlgorithmName.SHA256,
-                RSASignaturePadding.Pkcs1);
-
-            var signatureEncoded = Base64UrlEncode(signature);
-            return $"{unsignedToken}.{signatureEncoded}";
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to create GitHub App JWT.");
-            return null;
-        }
-    }
-
-    // Lazily parses and caches the GitHub App private key.
-    private RSA? GetOrCreatePrivateKey()
-    {
-        if (_appPrivateKey is not null)
-        {
-            return _appPrivateKey;
-        }
-
-        if (string.IsNullOrWhiteSpace(_settings.App.PrivateKey))
-        {
-            _logger.LogWarning("GitHub App private key is missing.");
-            return null;
-        }
-
-        try
-        {
-            var normalized = NormalizePrivateKey(_settings.App.PrivateKey);
-            var rsa = RSA.Create();
-            rsa.ImportFromPem(normalized);
-            _appPrivateKey = rsa;
-            return _appPrivateKey;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse GitHub App private key.");
-            return null;
-        }
-    }
-
-    // Normalizes raw or base64-encoded PEM key material into PEM format.
-    private static string NormalizePrivateKey(string value)
-    {
-        var trimmed = value.Trim();
-        var normalized = trimmed.Replace("\\n", "\n");
-        if (normalized.Contains("BEGIN", StringComparison.OrdinalIgnoreCase))
-        {
-            return normalized;
-        }
-
-        var bytes = Convert.FromBase64String(trimmed);
-        return Encoding.UTF8.GetString(bytes);
-    }
-
-    // Encodes bytes into Base64Url for JWT signing.
-    private static string Base64UrlEncode(byte[] value)
-    {
-        var encoded = Convert.ToBase64String(value);
-        return encoded
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
-
     private sealed record InstallationTokenResponse(
         [property: JsonPropertyName("token")] string Token,
         [property: JsonPropertyName("expires_at")] DateTimeOffset ExpiresAt);
+
+    private sealed record InstallationTokenCacheEntry(string Token, DateTimeOffset ExpiresAt);
 }

@@ -1,17 +1,25 @@
 using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Yotei.Api.Data;
 using Yotei.Api.Features.Flow.Inference;
 using Yotei.Api.Features.Ingestion;
 using Yotei.Api.Features.ReviewSessions;
 using Yotei.Api.Features.Flow;
 using Yotei.Api.Storage;
+using Yotei.Api.Features.Tenancy;
 
 namespace Yotei.Api.Infrastructure;
 
 public static class ServiceRegistration
 {
+    /// <summary>
+    /// Registers infrastructure services, storage, and integrations for the API.
+    /// </summary>
+    /// <param name="services">The service collection being configured.</param>
+    /// <param name="configuration">The app configuration values.</param>
+    /// <returns>The configured service collection.</returns>
     public static IServiceCollection AddYoteiInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddHealthChecks();
@@ -26,17 +34,29 @@ public static class ServiceRegistration
         {
             services.AddDbContext<YoteiDbContext>(options =>
             {
-                var connectionString = configuration.GetConnectionString("Postgres");
+                var connectionString = NormalizePostgresConnectionString(
+                    configuration.GetConnectionString("Postgres"));
                 options.UseNpgsql(connectionString);
             });
         }
 
         services.Configure<StorageSettings>(configuration.GetSection("Storage"));
         services.Configure<GitHubSettings>(configuration.GetSection("GitHub"));
+        services.Configure<FrontendSettings>(configuration.GetSection("Frontend"));
+        services.Configure<TenancySettings>(configuration.GetSection("Tenancy"));
         services.Configure<OpenAiSettings>(configuration.GetSection("OpenAI"));
         services.Configure<FlowInferenceOptions>(configuration.GetSection("FlowInference"));
+        services.AddScoped<TenantContext>();
+        services.AddScoped<TenantResolverMiddleware>();
+        services.AddScoped<TenantProvisioningService>();
+        services.AddSingleton<IGitHubAppJwtFactory, GitHubAppJwtFactory>();
         services.AddSingleton<IGitHubAccessTokenProvider, GitHubAccessTokenProvider>();
         services.AddHttpClient(GitHubHttpClientConfigurator.ClientName, (provider, client) =>
+        {
+            var settings = provider.GetRequiredService<IOptions<GitHubSettings>>().Value;
+            GitHubHttpClientConfigurator.Configure(client, settings);
+        });
+        services.AddHttpClient<IGitHubInstallationClient, GitHubInstallationClient>((provider, client) =>
         {
             var settings = provider.GetRequiredService<IOptions<GitHubSettings>>().Value;
             GitHubHttpClientConfigurator.Configure(client, settings);
@@ -79,5 +99,41 @@ public static class ServiceRegistration
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// Normalizes Render-style Postgres URLs into Npgsql key/value connection strings.
+    /// </summary>
+    private static string? NormalizePostgresConnectionString(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return connectionString;
+        }
+
+        if (!connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
+            !connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        {
+            return connectionString;
+        }
+
+        var uri = new Uri(connectionString);
+        var userInfo = uri.UserInfo.Split(':', 2, StringSplitOptions.RemoveEmptyEntries);
+        var username = userInfo.Length > 0 ? Uri.UnescapeDataString(userInfo[0]) : string.Empty;
+        var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty;
+        var database = uri.AbsolutePath.TrimStart('/').Trim();
+        var port = uri.IsDefaultPort ? 5432 : uri.Port;
+
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = uri.Host,
+            Port = port,
+            Database = database,
+            Username = username,
+            Password = password,
+            SslMode = SslMode.Require
+        };
+
+        return builder.ConnectionString;
     }
 }

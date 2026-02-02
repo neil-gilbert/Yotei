@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
+using Yotei.Api.Features.Tenancy;
 
 namespace Yotei.Api.Features.Insights;
 
@@ -19,6 +20,7 @@ public static class InsightsEndpoints
             string? from,
             string? to,
             string? repo,
+            TenantContext tenantContext,
             YoteiDbContext db,
             CancellationToken cancellationToken) =>
         {
@@ -35,6 +37,7 @@ public static class InsightsEndpoints
             var snapshotQuery = db.PullRequestSnapshots
                 .AsNoTracking()
                 .Include(snapshot => snapshot.Repository)
+                .Where(snapshot => snapshot.TenantId == tenantContext.TenantId)
                 .AsQueryable();
 
             if (fromDate.HasValue)

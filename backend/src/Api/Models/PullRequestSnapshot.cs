@@ -3,6 +3,8 @@ namespace Yotei.Api.Models;
 public class PullRequestSnapshot
 {
     public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Tenant? Tenant { get; set; }
     public Guid RepositoryId { get; set; }
     public Repository? Repository { get; set; }
 

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
+using Yotei.Api.Features.Tenancy;
 
 namespace Yotei.Api.Features.Explanations;
 
@@ -9,11 +10,17 @@ public static class ExplanationEndpoints
     {
         app.MapGet("/change-nodes/{nodeId:guid}/explanations", async (
             Guid nodeId,
+            TenantContext tenantContext,
             YoteiDbContext db) =>
         {
             var explanations = await db.ChangeNodeExplanations
                 .AsNoTracking()
-                .Where(explanation => explanation.ChangeNodeId == nodeId)
+                .Where(explanation =>
+                    explanation.ChangeNodeId == nodeId &&
+                    explanation.ChangeNode != null &&
+                    explanation.ChangeNode.ChangeTree != null &&
+                    explanation.ChangeNode.ChangeTree.PullRequestSnapshot != null &&
+                    explanation.ChangeNode.ChangeTree.PullRequestSnapshot.TenantId == tenantContext.TenantId)
                 .OrderByDescending(explanation => explanation.CreatedAt)
                 .Select(explanation => new ExplanationResponse(
                     explanation.Id,

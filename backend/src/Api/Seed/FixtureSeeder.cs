@@ -101,11 +101,26 @@ public static class FixtureSeeder
         SeedFixture fixture,
         ILogger logger)
     {
-        var repo = await db.Repositories.FirstOrDefaultAsync(r => r.Owner == fixture.Owner && r.Name == fixture.Name);
+        var tenant = await db.Tenants.FirstOrDefaultAsync();
+        if (tenant is null)
+        {
+            tenant = new Tenant
+            {
+                Name = "Fixture",
+                Slug = "fixture",
+                Token = "fixture-token"
+            };
+            db.Tenants.Add(tenant);
+            await db.SaveChangesAsync();
+        }
+
+        var repo = await db.Repositories
+            .FirstOrDefaultAsync(r => r.TenantId == tenant.Id && r.Owner == fixture.Owner && r.Name == fixture.Name);
         if (repo is null)
         {
             repo = new Repository
             {
+                TenantId = tenant.Id,
                 Owner = fixture.Owner,
                 Name = fixture.Name,
                 DefaultBranch = fixture.DefaultBranch ?? "main"
@@ -123,6 +138,7 @@ public static class FixtureSeeder
                 .Include(snapshot => snapshot.FileChanges)
                 .FirstOrDefaultAsync(snapshot =>
                     snapshot.RepositoryId == repo.Id &&
+                    snapshot.TenantId == tenant.Id &&
                     snapshot.PrNumber == fixture.PrNumber &&
                     snapshot.HeadSha == fixture.HeadSha);
 
@@ -139,6 +155,7 @@ public static class FixtureSeeder
         var snapshot = new PullRequestSnapshot
         {
             Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
             Repository = repo,
             PrNumber = fixture.PrNumber,
             BaseSha = fixture.BaseSha,

@@ -35,6 +35,11 @@ services:
           name: yotei-frontend
           type: web
           envVarKey: RENDER_EXTERNAL_URL
+      - key: Frontend__BaseUrl
+        fromService:
+          name: yotei-frontend
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
 
   - type: web
     name: yotei-frontend
@@ -47,3 +52,5 @@ services:
           name: yotei-api
           type: web
           envVarKey: RENDER_EXTERNAL_URL
+      - key: VITE_GITHUB_APP_INSTALL_URL
+        value: "https://github.com/apps/<app-slug>/installations/new"

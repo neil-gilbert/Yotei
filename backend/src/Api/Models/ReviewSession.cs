@@ -6,6 +6,8 @@ namespace Yotei.Api.Models;
 public class ReviewSession
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Tenant? Tenant { get; set; }
     public Guid PullRequestSnapshotId { get; set; }
     public PullRequestSnapshot? PullRequestSnapshot { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

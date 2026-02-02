@@ -5,6 +5,8 @@ namespace Yotei.Api.Data;
 
 public class YoteiDbContext(DbContextOptions<YoteiDbContext> options) : DbContext(options)
 {
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<GitHubInstallation> GitHubInstallations => Set<GitHubInstallation>();
     public DbSet<Repository> Repositories => Set<Repository>();
     public DbSet<IngestionCursor> IngestionCursors => Set<IngestionCursor>();
     public DbSet<PullRequestSnapshot> PullRequestSnapshots => Set<PullRequestSnapshot>();
@@ -29,9 +31,24 @@ public class YoteiDbContext(DbContextOptions<YoteiDbContext> options) : DbContex
     /// <param name="modelBuilder">The EF model builder used for configuration.</param>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Tenant>()
+            .HasIndex(tenant => tenant.Token)
+            .IsUnique();
+
+        modelBuilder.Entity<Tenant>()
+            .HasIndex(tenant => tenant.Slug)
+            .IsUnique();
+
+        modelBuilder.Entity<GitHubInstallation>()
+            .HasIndex(installation => installation.InstallationId)
+            .IsUnique();
+
+        modelBuilder.Entity<GitHubInstallation>()
+            .HasIndex(installation => installation.TenantId);
+
         // Snapshot-related indices.
         modelBuilder.Entity<Repository>()
-            .HasIndex(repo => new { repo.Owner, repo.Name })
+            .HasIndex(repo => new { repo.TenantId, repo.Owner, repo.Name })
             .IsUnique();
 
         modelBuilder.Entity<IngestionCursor>()

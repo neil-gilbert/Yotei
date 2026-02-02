@@ -14,7 +14,12 @@ const flowColumnX = {
 };
 
 export default function App() {
-  const [activeView, setActiveView] = useState("dashboard");
+  const [tenantToken, setTenantToken] = useState(
+    () => localStorage.getItem("yoteiTenantToken") ?? ""
+  );
+  const [activeView, setActiveView] = useState(() =>
+    localStorage.getItem("yoteiTenantToken") ? "dashboard" : "setup"
+  );
   const [snapshots, setSnapshots] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -88,6 +93,62 @@ export default function App() {
   const ingestUrl = `${normalizedApiBase}/ingest/github`;
   const syncUrl = `${normalizedApiBase}/ingest/github/sync`;
 
+  const apiFetch = async (path, options = {}) => {
+    const resolvedPath = path.startsWith("http")
+      ? path
+      : `${normalizedApiBase}${path.startsWith("/") ? "" : "/"}${path}`;
+    const headers = new Headers(options.headers ?? {});
+    if (tenantToken) {
+      headers.set("X-Tenant-Token", tenantToken);
+    }
+    return fetch(resolvedPath, { ...options, headers });
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tokenParam = params.get("tenant") ?? params.get("tenantToken");
+    const viewParam = params.get("view");
+    let updated = false;
+
+    if (tokenParam) {
+      localStorage.setItem("yoteiTenantToken", tokenParam);
+      setTenantToken(tokenParam);
+      updated = true;
+    }
+
+    if (viewParam) {
+      setActiveView(viewParam);
+      updated = true;
+    }
+
+    if (updated) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (event.key !== "yoteiTenantToken") {
+        return;
+      }
+      setTenantToken(event.newValue ?? "");
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  useEffect(() => {
+    if (!tenantToken && activeView !== "setup") {
+      setActiveView("setup");
+      return;
+    }
+
+    if (tenantToken && activeView === "setup") {
+      setActiveView("dashboard");
+    }
+  }, [tenantToken, activeView]);
+
   const handleCopy = async (value, label) => {
     if (!value) {
       return;
@@ -101,11 +162,17 @@ export default function App() {
     }
   };
 
+  const handleTenantReset = () => {
+    localStorage.removeItem("yoteiTenantToken");
+    setTenantToken("");
+    setActiveView("setup");
+  };
+
   const fetchSnapshots = async (nextOffset = offset, nextLimit = limit) => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${apiBase}/review-sessions?limit=${nextLimit}&offset=${nextOffset}`
       );
       if (!res.ok) {
@@ -131,7 +198,7 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${apiBase}/review-sessions/${sessionId}`);
+      const res = await apiFetch(`${apiBase}/review-sessions/${sessionId}`);
       if (!res.ok) {
         throw new Error("Failed to load review session detail");
       }
@@ -160,7 +227,7 @@ export default function App() {
         params.set("pathPrefix", pathPrefixFilter);
       }
       const query = params.toString();
-      const res = await fetch(
+      const res = await apiFetch(
         `${apiBase}/snapshots/${snapshotId}/file-changes${query ? `?${query}` : ""}`
       );
       if (!res.ok) {
@@ -182,7 +249,7 @@ export default function App() {
     }
     setTreeError("");
     try {
-      const res = await fetch(`${apiBase}/review-sessions/${snapshotId}/change-tree`);
+      const res = await apiFetch(`${apiBase}/review-sessions/${snapshotId}/change-tree`);
       if (res.status === 404) {
         setChangeTree([]);
         return;
@@ -206,7 +273,7 @@ export default function App() {
     setSummaryStatus("loading");
     setSummaryError("");
     try {
-      const res = await fetch(`${apiBase}/review-sessions/${sessionId}/summary`);
+      const res = await apiFetch(`${apiBase}/review-sessions/${sessionId}/summary`);
       if (res.status === 404) {
         setSummary(null);
         setSummaryStatus("empty");
@@ -233,7 +300,7 @@ export default function App() {
     setFlowStatus("loading");
     setFlowError("");
     try {
-      const res = await fetch(`${apiBase}/review-sessions/${sessionId}/flow`);
+      const res = await apiFetch(`${apiBase}/review-sessions/${sessionId}/flow`);
       if (res.status === 404) {
         setFlowGraph({ nodes: [], edges: [] });
         setFlowStatus("empty");
@@ -262,7 +329,7 @@ export default function App() {
     setTranscriptStatus("loading");
     setTranscriptError("");
     try {
-      const res = await fetch(`${apiBase}/review-sessions/${sessionId}/transcript`);
+      const res = await apiFetch(`${apiBase}/review-sessions/${sessionId}/transcript`);
       if (!res.ok) {
         throw new Error("Failed to load transcript");
       }
@@ -282,7 +349,7 @@ export default function App() {
     setTranscriptExportStatus("loading");
     setTranscriptError("");
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${apiBase}/review-sessions/${selectedId}/transcript/export?format=${format}`
       );
       if (!res.ok) {
@@ -321,7 +388,7 @@ export default function App() {
       setComplianceError("");
     }
     try {
-      const res = await fetch(`${apiBase}/review-sessions/${sessionId}/compliance-report`);
+      const res = await apiFetch(`${apiBase}/review-sessions/${sessionId}/compliance-report`);
       if (!res.ok) {
         throw new Error("Failed to load compliance report");
       }
@@ -370,7 +437,7 @@ export default function App() {
         params.set("repo", repoFilter);
       }
       const query = params.toString();
-      const res = await fetch(`${apiBase}/insights/org${query ? `?${query}` : ""}`);
+      const res = await apiFetch(`${apiBase}/insights/org${query ? `?${query}` : ""}`);
       if (!res.ok) {
         throw new Error("Failed to load insights");
       }
@@ -388,7 +455,7 @@ export default function App() {
     setBuildStatus("loading");
     setBuildError("");
     try {
-      const res = await fetch(`${apiBase}/review-sessions/${selectedId}/build`, {
+      const res = await apiFetch(`${apiBase}/review-sessions/${selectedId}/build`, {
         method: "POST"
       });
       if (!res.ok) {
@@ -418,7 +485,7 @@ export default function App() {
     setBehaviourStatus("loading");
     setBehaviourError("");
     try {
-      const res = await fetch(`${apiBase}/review-nodes/${nodeId}/behaviour-summary`);
+      const res = await apiFetch(`${apiBase}/review-nodes/${nodeId}/behaviour-summary`);
       if (res.status === 404) {
         setBehaviourSummary(null);
         setBehaviourStatus("empty");
@@ -452,7 +519,7 @@ export default function App() {
     setChecklistStatus("loading");
     setChecklistError("");
     try {
-      const res = await fetch(`${apiBase}/review-nodes/${nodeId}/checklist`);
+      const res = await apiFetch(`${apiBase}/review-nodes/${nodeId}/checklist`);
       if (res.status === 404) {
         setChecklist([]);
         setChecklistStatus("empty");
@@ -487,7 +554,7 @@ export default function App() {
     setQuestionsError("");
     setQuestionsSource("");
     try {
-      const res = await fetch(`${apiBase}/review-nodes/${nodeId}/questions`);
+      const res = await apiFetch(`${apiBase}/review-nodes/${nodeId}/questions`);
       if (res.status === 404) {
         setReviewerQuestions([]);
         setQuestionsStatus("empty");
@@ -513,7 +580,7 @@ export default function App() {
     setChecklistAddStatus("saving");
     setChecklistAddError("");
     try {
-      const res = await fetch(`${apiBase}/review-nodes/${nodeId}/checklist/items`, {
+      const res = await apiFetch(`${apiBase}/review-nodes/${nodeId}/checklist/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.trim(), source })
@@ -550,7 +617,7 @@ export default function App() {
     setVoiceStatus("sending");
     setVoiceError("");
     try {
-      const res = await fetch(`${apiBase}/review-nodes/${selectedNode.id}/voice-query`, {
+      const res = await apiFetch(`${apiBase}/review-nodes/${selectedNode.id}/voice-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: questionText })
@@ -596,7 +663,7 @@ export default function App() {
     setDiffStatus("loading");
     setDiffText("");
     try {
-      const res = await fetch(`${apiBase}/raw-diffs/${snapshotId}?path=${encodeURIComponent(path)}`);
+      const res = await apiFetch(`${apiBase}/raw-diffs/${snapshotId}?path=${encodeURIComponent(path)}`);
       if (!res.ok) {
         throw new Error("Diff not available");
       }
@@ -616,7 +683,7 @@ export default function App() {
     setFullDiffStatus("loading");
     setFullDiffError("");
     try {
-      const res = await fetch(`${apiBase}/raw-diffs/${snapshotId}?path=${encodeURIComponent(path)}`);
+      const res = await apiFetch(`${apiBase}/raw-diffs/${snapshotId}?path=${encodeURIComponent(path)}`);
       if (!res.ok) {
         throw new Error("Diff not available");
       }
@@ -642,7 +709,7 @@ export default function App() {
     try {
       const responses = await Promise.all(
         missing.map(async (path) => {
-          const res = await fetch(`${apiBase}/raw-diffs/${snapshotId}?path=${encodeURIComponent(path)}`);
+          const res = await apiFetch(`${apiBase}/raw-diffs/${snapshotId}?path=${encodeURIComponent(path)}`);
           if (!res.ok) {
             throw new Error(`Diff not available for ${path}`);
           }
@@ -671,7 +738,7 @@ export default function App() {
     setDiffStatus("loading");
     setDiffText("");
     try {
-      const res = await fetch(`${apiBase}/review-nodes/${nodeId}/diff`);
+      const res = await apiFetch(`${apiBase}/review-nodes/${nodeId}/diff`);
       if (!res.ok) {
         throw new Error("Diff not available");
       }
@@ -691,7 +758,7 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${apiBase}/snapshots/${selectedId}`, { method: "DELETE" });
+      const res = await apiFetch(`${apiBase}/snapshots/${selectedId}`, { method: "DELETE" });
       if (!res.ok) {
         throw new Error("Failed to delete review session");
       }
@@ -1310,11 +1377,34 @@ export default function App() {
               Yotei uses a GitHub App for secure, org-friendly access. Install it once, then let
               webhook events keep review sessions in sync.
             </p>
+            <div
+              className={`setup__callout ${
+                tenantToken ? "setup__callout--success" : "setup__callout--warning"
+              }`}
+            >
+              <div className="setup__token-row">
+                <div>
+                  <strong>
+                    {tenantToken ? "Tenant connected" : "Tenant not connected"}
+                  </strong>
+                  <p>
+                    {tenantToken
+                      ? "This browser is linked to a tenant token for API access."
+                      : "Install the GitHub App to receive a tenant token and unlock the dashboard."}
+                  </p>
+                </div>
+                {tenantToken && (
+                  <button className="button ghost" onClick={handleTenantReset}>
+                    Disconnect
+                  </button>
+                )}
+              </div>
+            </div>
             {!isAdminSetup && (
               <div className="setup__cta">
                 <p>
                   You do not need Render access. Install the GitHub App and pick the repositories to
-                  monitor.
+                  monitor. You will be redirected back with your tenant token.
                 </p>
                 {installUrl ? (
                   <a className="button" href={installUrl} target="_blank" rel="noreferrer">
@@ -1411,7 +1501,7 @@ export default function App() {
                 <h3>{isAdminSetup ? "Install on a repo or org" : "Confirm the install"}</h3>
                 <p>
                   {isAdminSetup
-                    ? "Choose which repos Yotei should watch."
+                    ? "Choose which repos Yotei should watch and configure the callback."
                     : "Keep the installation connected for ongoing sync."}
                 </p>
               </div>
@@ -1419,8 +1509,8 @@ export default function App() {
             <ul className="setup__list">
               {isAdminSetup ? (
                 <>
-                  <li>Copy the Installation ID from the install screen.</li>
-                  <li>Keep the App ID and private key handy.</li>
+                  <li>Set the setup callback URL to {`${normalizedApiBase}/github/install`}.</li>
+                  <li>Install the app on the org or repos you want to monitor.</li>
                 </>
               ) : (
                 <>
@@ -1442,15 +1532,16 @@ export default function App() {
                   </div>
                 </div>
                 <pre className="setup__code">{`GitHub__App__AppId=...
-GitHub__App__InstallationId=...
 GitHub__App__PrivateKey=...
-GitHub__App__WebhookSecret=...`}</pre>
+GitHub__App__WebhookSecret=...
+Frontend__BaseUrl=...
+VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
                 <div className="setup__code-actions">
                   <button
                     className="button ghost"
                     onClick={() =>
                       handleCopy(
-                        `GitHub__App__AppId=\nGitHub__App__InstallationId=\nGitHub__App__PrivateKey=\nGitHub__App__WebhookSecret=`,
+                        `GitHub__App__AppId=\nGitHub__App__PrivateKey=\nGitHub__App__WebhookSecret=\nFrontend__BaseUrl=\nVITE_GITHUB_APP_INSTALL_URL=`,
                         "env"
                       )
                     }
@@ -1464,12 +1555,13 @@ GitHub__App__WebhookSecret=...`}</pre>
                 <div className="setup__step-header">
                   <span className="setup__step-index">04</span>
                   <div>
-                    <h3>Configure the webhook</h3>
-                    <p>Point GitHub to the ingestion endpoint.</p>
+                    <h3>Configure webhooks + callbacks</h3>
+                    <p>Point GitHub to the ingestion and setup endpoints.</p>
                   </div>
                 </div>
                 <ul className="setup__list">
                   <li>Webhook URL: {webhookUrl}</li>
+                  <li>Setup URL: {`${normalizedApiBase}/github/install`}</li>
                   <li>Content type: application/json</li>
                   <li>Secret: same as GitHub__App__WebhookSecret</li>
                 </ul>
@@ -1501,7 +1593,12 @@ GitHub__App__WebhookSecret=...`}</pre>
             <div className="setup__footer-actions">
               <button
                 className="button ghost"
-                onClick={() => handleCopy(`curl -X POST "${syncUrl}"`, "curl-sync")}
+                onClick={() =>
+                  handleCopy(
+                    `curl -X POST "${syncUrl}" -H "X-Tenant-Token: <token>"`,
+                    "curl-sync"
+                  )
+                }
               >
                 {copiedLabel === "curl-sync" ? "Copied" : "Copy sync curl"}
               </button>
@@ -1509,7 +1606,7 @@ GitHub__App__WebhookSecret=...`}</pre>
                 className="button"
                 onClick={() =>
                   handleCopy(
-                    `curl -X POST "${ingestUrl}" -H "Content-Type: application/json" -d '{"owner":"ORG","name":"REPO","prNumber":123}'`,
+                    `curl -X POST "${ingestUrl}" -H "Content-Type: application/json" -H "X-Tenant-Token: <token>" -d '{"owner":"ORG","name":"REPO","prNumber":123}'`,
                     "curl-one"
                   )
                 }

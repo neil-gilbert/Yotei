@@ -26,7 +26,7 @@ public record GitHubAppSettings
     public long AppId { get; init; }
 
     /// <summary>
-    /// The GitHub installation identifier used to scope API access.
+    /// Optional GitHub installation identifier used as a fallback for single-tenant setups.
     /// </summary>
     public long InstallationId { get; init; }
 

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
 using Yotei.Api.Models;
+using Yotei.Api.Features.Tenancy;
 
 namespace Yotei.Api.Features.Ingestion;
 
@@ -15,7 +16,10 @@ public static class IngestionEndpoints
     public static IEndpointRouteBuilder MapIngestionEndpoints(this IEndpointRouteBuilder app)
     {
         // Manually ingest a snapshot payload.
-        app.MapPost("/ingest/snapshot", async (IngestSnapshotRequest request, YoteiDbContext db) =>
+        app.MapPost("/ingest/snapshot", async (
+            IngestSnapshotRequest request,
+            TenantContext tenantContext,
+            YoteiDbContext db) =>
         {
             var validationErrors = request.Validate();
             if (validationErrors.Count > 0)
@@ -23,13 +27,15 @@ public static class IngestionEndpoints
                 return Results.BadRequest(new { errors = validationErrors });
             }
 
+            var tenantId = tenantContext.TenantId;
             var repo = await db.Repositories
-                .FirstOrDefaultAsync(r => r.Owner == request.Owner && r.Name == request.Name);
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Owner == request.Owner && r.Name == request.Name);
 
             if (repo is null)
             {
                 repo = new Repository
                 {
+                    TenantId = tenantId,
                     Owner = request.Owner,
                     Name = request.Name,
                     DefaultBranch = request.DefaultBranch ?? "main"
@@ -57,6 +63,7 @@ public static class IngestionEndpoints
 
             var snapshot = new PullRequestSnapshot
             {
+                TenantId = tenantId,
                 Repository = repo,
                 PrNumber = request.PrNumber,
                 BaseSha = request.BaseSha,
@@ -74,6 +81,7 @@ public static class IngestionEndpoints
         // Pull a GitHub PR into the ingestion pipeline.
         app.MapPost("/ingest/github", async (
             GitHubIngestRequest request,
+            TenantContext tenantContext,
             IGithubIngestionService ingestionService,
             CancellationToken cancellationToken) =>
         {
@@ -83,7 +91,11 @@ public static class IngestionEndpoints
                 return Results.BadRequest(new { errors = validationErrors });
             }
 
-            var result = await ingestionService.IngestPullRequestAsync(request, cancellationToken);
+            var result = await ingestionService.IngestPullRequestAsync(
+                request,
+                tenantContext.TenantId,
+                null,
+                cancellationToken);
             if (result.Errors.Count > 0 || result.SnapshotId is null)
             {
                 return Results.Problem(detail: string.Join(" | ", result.Errors));
@@ -95,10 +107,11 @@ public static class IngestionEndpoints
 
         // Sync configured GitHub repos for open PRs.
         app.MapPost("/ingest/github/sync", async (
+            TenantContext tenantContext,
             IGithubIngestionService ingestionService,
             CancellationToken cancellationToken) =>
         {
-            var result = await ingestionService.SyncConfiguredReposAsync(cancellationToken);
+            var result = await ingestionService.SyncConfiguredReposAsync(tenantContext.TenantId, cancellationToken);
             var response = new GitHubSyncResponse(result.Repositories, result.PullRequests, result.SnapshotsCreated, result.Errors);
             return Results.Ok(response);
         });
@@ -107,6 +120,7 @@ public static class IngestionEndpoints
         app.MapPost("/ingest/github/webhook", async (
             HttpRequest request,
             IGithubIngestionService ingestionService,
+            TenantProvisioningService provisioningService,
             IConfiguration configuration,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
@@ -133,7 +147,12 @@ public static class IngestionEndpoints
             return eventName switch
             {
                 "ping" => Results.Ok(new { status = "pong" }),
-                "pull_request" => await HandlePullRequestWebhookAsync(payload, ingestionService, logger, cancellationToken),
+                "pull_request" => await HandlePullRequestWebhookAsync(
+                    payload,
+                    ingestionService,
+                    provisioningService,
+                    logger,
+                    cancellationToken),
                 _ => Results.Ok(new { ignored = eventName })
             };
         });
@@ -159,10 +178,17 @@ public static class IngestionEndpoints
     private static async Task<IResult> HandlePullRequestWebhookAsync(
         string payload,
         IGithubIngestionService ingestionService,
+        TenantProvisioningService provisioningService,
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        if (!TryParsePullRequestPayload(payload, out var owner, out var name, out var prNumber, out var action))
+        if (!TryParsePullRequestPayload(
+                payload,
+                out var owner,
+                out var name,
+                out var prNumber,
+                out var action,
+                out var installationId))
         {
             return Results.BadRequest(new { error = "Invalid pull request payload." });
         }
@@ -172,8 +198,16 @@ public static class IngestionEndpoints
             return Results.Ok(new { ignored = action });
         }
 
+        var tenant = await provisioningService.EnsureTenantForInstallationAsync(installationId, cancellationToken);
+        if (tenant is null)
+        {
+            return Results.Problem(detail: "Tenant provisioning failed for installation.");
+        }
+
         var result = await ingestionService.IngestPullRequestAsync(
             new GitHubIngestRequest(owner, name, prNumber),
+            tenant.Id,
+            installationId,
             cancellationToken);
 
         if (result.Errors.Count > 0 || result.SnapshotId is null)
@@ -204,12 +238,14 @@ public static class IngestionEndpoints
         out string owner,
         out string name,
         out int prNumber,
-        out string? action)
+        out string? action,
+        out long installationId)
     {
         owner = string.Empty;
         name = string.Empty;
         prNumber = 0;
         action = null;
+        installationId = 0;
 
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
@@ -242,6 +278,17 @@ public static class IngestionEndpoints
 
         if (!repoElement.TryGetProperty("owner", out var ownerElement) ||
             !TryGetString(ownerElement, "login", out owner))
+        {
+            return false;
+        }
+
+        if (!root.TryGetProperty("installation", out var installationElement))
+        {
+            return false;
+        }
+
+        if (!installationElement.TryGetProperty("id", out var idElement) ||
+            !idElement.TryGetInt64(out installationId))
         {
             return false;
         }

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
 using Yotei.Api.Infrastructure;
 using Yotei.Api.Storage;
+using Yotei.Api.Features.Tenancy;
 using ChangeTreeModel = Yotei.Api.Models.ChangeTree;
 using ChangeNodeModel = Yotei.Api.Models.ChangeNode;
 
@@ -13,6 +14,7 @@ public static class ChangeTreeEndpoints
     {
         app.MapPost("/snapshots/{snapshotId:guid}/change-tree/build", async (
             Guid snapshotId,
+            TenantContext tenantContext,
             YoteiDbContext db,
             IRawDiffStorage storage,
             IExplanationGenerator explanationGenerator,
@@ -20,7 +22,9 @@ public static class ChangeTreeEndpoints
         {
             var snapshot = await db.PullRequestSnapshots
                 .Include(s => s.FileChanges)
-                .FirstOrDefaultAsync(s => s.Id == snapshotId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    s => s.Id == snapshotId && s.TenantId == tenantContext.TenantId,
+                    cancellationToken);
 
             if (snapshot is null)
             {
@@ -95,12 +99,16 @@ public static class ChangeTreeEndpoints
 
         app.MapGet("/snapshots/{snapshotId:guid}/change-tree", async (
             Guid snapshotId,
+            TenantContext tenantContext,
             YoteiDbContext db) =>
         {
             var tree = await db.ChangeTrees
                 .AsNoTracking()
                 .Include(t => t.Nodes)
-                .FirstOrDefaultAsync(t => t.PullRequestSnapshotId == snapshotId);
+                .FirstOrDefaultAsync(t =>
+                    t.PullRequestSnapshotId == snapshotId &&
+                    t.PullRequestSnapshot != null &&
+                    t.PullRequestSnapshot.TenantId == tenantContext.TenantId);
 
             if (tree is null)
             {

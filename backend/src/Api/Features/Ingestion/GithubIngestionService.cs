@@ -17,16 +17,23 @@ public interface IGithubIngestionService
     /// Ingests a GitHub pull request into a review session snapshot.
     /// </summary>
     /// <param name="request">The GitHub ingestion request parameters.</param>
+    /// <param name="tenantId">The tenant identifier to scope ingestion.</param>
+    /// <param name="installationId">Optional GitHub installation identifier for app auth.</param>
     /// <param name="cancellationToken">Cancellation token for async operations.</param>
     /// <returns>The ingestion result describing created artifacts.</returns>
-    Task<GitHubIngestResult> IngestPullRequestAsync(GitHubIngestRequest request, CancellationToken cancellationToken);
+    Task<GitHubIngestResult> IngestPullRequestAsync(
+        GitHubIngestRequest request,
+        Guid tenantId,
+        long? installationId,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Syncs configured repositories and ingests discovered pull requests.
     /// </summary>
+    /// <param name="tenantId">The tenant identifier to scope ingestion.</param>
     /// <param name="cancellationToken">Cancellation token for async operations.</param>
     /// <returns>The sync result describing processed repositories and snapshots.</returns>
-    Task<GitHubSyncResult> SyncConfiguredReposAsync(CancellationToken cancellationToken);
+    Task<GitHubSyncResult> SyncConfiguredReposAsync(Guid tenantId, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -67,24 +74,35 @@ public sealed class GithubIngestionService : IGithubIngestionService
     }
 
     /// <inheritdoc />
-    public async Task<GitHubIngestResult> IngestPullRequestAsync(GitHubIngestRequest request, CancellationToken cancellationToken)
+    public async Task<GitHubIngestResult> IngestPullRequestAsync(
+        GitHubIngestRequest request,
+        Guid tenantId,
+        long? installationId,
+        CancellationToken cancellationToken)
     {
         var errors = new List<string>();
 
-        var pullRequest = await FetchPullRequestAsync(request, errors, cancellationToken);
+        if (tenantId == Guid.Empty)
+        {
+            errors.Add("TenantId is required for GitHub ingestion.");
+            return new GitHubIngestResult(null, false, 0, errors);
+        }
+
+        var resolvedInstallationId = await ResolveInstallationIdAsync(tenantId, request.Owner, installationId, cancellationToken);
+        var pullRequest = await FetchPullRequestAsync(request, resolvedInstallationId, errors, cancellationToken);
         if (pullRequest is null)
         {
             return new GitHubIngestResult(null, false, 0, errors);
         }
 
-        var repo = await GetOrCreateRepositoryAsync(request.Owner, request.Name, pullRequest.Base.Ref, cancellationToken);
-        var existingSnapshot = await FindExistingSnapshotAsync(repo, request.PrNumber, pullRequest.Head.Sha, cancellationToken);
+        var repo = await GetOrCreateRepositoryAsync(tenantId, request.Owner, request.Name, pullRequest.Base.Ref, cancellationToken);
+        var existingSnapshot = await FindExistingSnapshotAsync(repo, tenantId, request.PrNumber, pullRequest.Head.Sha, cancellationToken);
         if (existingSnapshot is not null)
         {
             return new GitHubIngestResult(existingSnapshot.Id, false, existingSnapshot.FileChanges.Count, errors);
         }
 
-        var files = await FetchPullRequestFilesAsync(request, errors, cancellationToken);
+        var files = await FetchPullRequestFilesAsync(request, resolvedInstallationId, errors, cancellationToken);
         if (errors.Count > 0)
         {
             return new GitHubIngestResult(null, false, 0, errors);
@@ -93,6 +111,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
         var snapshot = new PullRequestSnapshot
         {
             Id = Guid.NewGuid(),
+            TenantId = tenantId,
             Repository = repo,
             PrNumber = request.PrNumber,
             BaseSha = pullRequest.Base.Sha,
@@ -126,12 +145,18 @@ public sealed class GithubIngestionService : IGithubIngestionService
     }
 
     /// <inheritdoc />
-    public async Task<GitHubSyncResult> SyncConfiguredReposAsync(CancellationToken cancellationToken)
+    public async Task<GitHubSyncResult> SyncConfiguredReposAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var errors = new List<string>();
         var repositories = 0;
         var pullRequests = 0;
         var snapshotsCreated = 0;
+
+        if (tenantId == Guid.Empty)
+        {
+            errors.Add("TenantId is required for GitHub sync.");
+            return new GitHubSyncResult(repositories, pullRequests, snapshotsCreated, errors);
+        }
 
         if (_settings.Repos is null || _settings.Repos.Length == 0)
         {
@@ -149,11 +174,18 @@ public sealed class GithubIngestionService : IGithubIngestionService
 
             repositories++;
             var processedPrs = new List<GithubPullRequestSummary>();
+            var resolvedInstallationId = await ResolveInstallationIdAsync(
+                tenantId,
+                repoDefinition.Owner,
+                null,
+                cancellationToken);
 
             if (repoDefinition.PrNumber is not null)
             {
                 var ingestResult = await IngestPullRequestAsync(
                     new GitHubIngestRequest(repoDefinition.Owner, repoDefinition.Name, repoDefinition.PrNumber.Value),
+                    tenantId,
+                    resolvedInstallationId,
                     cancellationToken);
 
                 if (ingestResult.Errors.Count > 0)
@@ -169,11 +201,17 @@ public sealed class GithubIngestionService : IGithubIngestionService
             }
             else
             {
-                var openPulls = await FetchOpenPullRequestsAsync(repoDefinition, errors, cancellationToken);
+                var openPulls = await FetchOpenPullRequestsAsync(
+                    repoDefinition,
+                    resolvedInstallationId,
+                    errors,
+                    cancellationToken);
                 foreach (var pull in openPulls)
                 {
                     var ingestResult = await IngestPullRequestAsync(
                         new GitHubIngestRequest(repoDefinition.Owner, repoDefinition.Name, pull.Number),
+                        tenantId,
+                        resolvedInstallationId,
                         cancellationToken);
 
                     if (ingestResult.Errors.Count > 0)
@@ -192,7 +230,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
 
             if (processedPrs.Count > 0)
             {
-                await UpsertIngestionCursorAsync(repoDefinition, processedPrs, cancellationToken);
+                await UpsertIngestionCursorAsync(tenantId, repoDefinition, processedPrs, cancellationToken);
             }
         }
 
@@ -203,21 +241,23 @@ public sealed class GithubIngestionService : IGithubIngestionService
     private async Task<HttpResponseMessage> SendAsync(
         HttpMethod method,
         string url,
+        long? installationId,
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(method, url);
-        await _accessTokenProvider.ApplyAuthenticationAsync(request, cancellationToken);
+        await _accessTokenProvider.ApplyAuthenticationAsync(request, installationId, cancellationToken);
         return await _httpClient.SendAsync(request, cancellationToken);
     }
 
     // Retrieves pull request details from the GitHub API.
     private async Task<GithubPullRequest?> FetchPullRequestAsync(
         GitHubIngestRequest request,
+        long? installationId,
         List<string> errors,
         CancellationToken cancellationToken)
     {
         var url = $"/repos/{request.Owner}/{request.Name}/pulls/{request.PrNumber}";
-        var response = await SendAsync(HttpMethod.Get, url, cancellationToken);
+        var response = await SendAsync(HttpMethod.Get, url, installationId, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -237,6 +277,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
     // Retrieves all files for a pull request using pagination.
     private async Task<List<GithubPullRequestFile>> FetchPullRequestFilesAsync(
         GitHubIngestRequest request,
+        long? installationId,
         List<string> errors,
         CancellationToken cancellationToken)
     {
@@ -246,7 +287,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
         while (true)
         {
             var url = $"/repos/{request.Owner}/{request.Name}/pulls/{request.PrNumber}/files?per_page={PageSize}&page={page}";
-            var response = await SendAsync(HttpMethod.Get, url, cancellationToken);
+            var response = await SendAsync(HttpMethod.Get, url, installationId, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 errors.Add($"GitHub file list fetch failed with status {(int)response.StatusCode}.");
@@ -274,6 +315,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
     // Retrieves open pull requests for a repository when syncing.
     private async Task<List<GithubPullRequestSummary>> FetchOpenPullRequestsAsync(
         RepoDefinition repo,
+        long? installationId,
         List<string> errors,
         CancellationToken cancellationToken)
     {
@@ -283,7 +325,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
         while (true)
         {
             var url = $"/repos/{repo.Owner}/{repo.Name}/pulls?state=open&per_page={PageSize}&page={page}";
-            var response = await SendAsync(HttpMethod.Get, url, cancellationToken);
+            var response = await SendAsync(HttpMethod.Get, url, installationId, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 errors.Add($"GitHub pull list fetch failed with status {(int)response.StatusCode}.");
@@ -310,18 +352,20 @@ public sealed class GithubIngestionService : IGithubIngestionService
 
     // Ensures a repository exists for ingestion, updating the default branch when provided.
     private async Task<Repository> GetOrCreateRepositoryAsync(
+        Guid tenantId,
         string owner,
         string name,
         string? defaultBranch,
         CancellationToken cancellationToken)
     {
         var repo = await _dbContext.Repositories
-            .FirstOrDefaultAsync(r => r.Owner == owner && r.Name == name, cancellationToken);
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Owner == owner && r.Name == name, cancellationToken);
 
         if (repo is null)
         {
             repo = new Repository
             {
+                TenantId = tenantId,
                 Owner = owner,
                 Name = name,
                 DefaultBranch = string.IsNullOrWhiteSpace(defaultBranch) ? "main" : defaultBranch
@@ -340,6 +384,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
     // Finds an existing snapshot for idempotent ingestion behavior.
     private async Task<PullRequestSnapshot?> FindExistingSnapshotAsync(
         Repository repo,
+        Guid tenantId,
         int prNumber,
         string headSha,
         CancellationToken cancellationToken)
@@ -349,6 +394,7 @@ public sealed class GithubIngestionService : IGithubIngestionService
             .Include(snapshot => snapshot.Repository)
             .FirstOrDefaultAsync(snapshot =>
                     snapshot.Repository != null &&
+                    snapshot.TenantId == tenantId &&
                     snapshot.Repository.Owner == repo.Owner &&
                     snapshot.Repository.Name == repo.Name &&
                     snapshot.PrNumber == prNumber &&
@@ -415,12 +461,13 @@ public sealed class GithubIngestionService : IGithubIngestionService
 
     // Upserts ingestion cursor entries for a repository after a sync.
     private async Task UpsertIngestionCursorAsync(
+        Guid tenantId,
         RepoDefinition repo,
         List<GithubPullRequestSummary> processedPrs,
         CancellationToken cancellationToken)
     {
         var repository = await _dbContext.Repositories
-            .FirstOrDefaultAsync(r => r.Owner == repo.Owner && r.Name == repo.Name, cancellationToken);
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Owner == repo.Owner && r.Name == repo.Name, cancellationToken);
 
         if (repository is null)
         {
@@ -453,6 +500,35 @@ public sealed class GithubIngestionService : IGithubIngestionService
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    // Resolves an installation id for the tenant and repo owner, with config fallback.
+    private async Task<long?> ResolveInstallationIdAsync(
+        Guid tenantId,
+        string owner,
+        long? installationId,
+        CancellationToken cancellationToken)
+    {
+        if (installationId is > 0)
+        {
+            return installationId;
+        }
+
+        if (tenantId != Guid.Empty)
+        {
+            var installation = await _dbContext.GitHubInstallations
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.AccountLogin == owner)
+                .OrderByDescending(item => item.UpdatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (installation is not null)
+            {
+                return installation.InstallationId;
+            }
+        }
+
+        return _settings.App.InstallationId > 0 ? _settings.App.InstallationId : null;
     }
 
     private sealed record RepoDefinition(string Owner, string Name, int? PrNumber);

@@ -1,13 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Yotei.Api.Data;
 using Yotei.Api.Features.FileChanges;
+using Yotei.Api.Features.Tenancy;
 namespace Yotei.Api.Features.Snapshots;
 
 public static class SnapshotEndpoints
 {
     public static IEndpointRouteBuilder MapSnapshotEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/snapshots", async (int? limit, int? offset, YoteiDbContext db) =>
+        app.MapGet("/snapshots", async (int? limit, int? offset, TenantContext tenantContext, YoteiDbContext db) =>
         {
             var resolvedLimit = limit ?? 20;
             var resolvedOffset = offset ?? 0;
@@ -31,6 +32,7 @@ public static class SnapshotEndpoints
             var snapshots = await db.PullRequestSnapshots
                 .AsNoTracking()
                 .Include(snapshot => snapshot.Repository)
+                .Where(snapshot => snapshot.TenantId == tenantContext.TenantId)
                 .OrderByDescending(snapshot => snapshot.IngestedAt)
                 .Skip(resolvedOffset)
                 .Take(resolvedLimit)
@@ -51,6 +53,7 @@ public static class SnapshotEndpoints
         app.MapGet("/snapshots/{snapshotId:guid}", async (
             Guid snapshotId,
             bool? includeFileChanges,
+            TenantContext tenantContext,
             YoteiDbContext db) =>
         {
             var includeChanges = includeFileChanges ?? true;
@@ -59,7 +62,7 @@ public static class SnapshotEndpoints
                 .AsNoTracking()
                 .Include(s => s.Repository)
                 .Include(s => s.FileChanges)
-                .FirstOrDefaultAsync(s => s.Id == snapshotId);
+                .FirstOrDefaultAsync(s => s.Id == snapshotId && s.TenantId == tenantContext.TenantId);
 
             if (snapshot is null)
             {
@@ -95,11 +98,14 @@ public static class SnapshotEndpoints
             return Results.Ok(response);
         });
 
-        app.MapDelete("/snapshots/{snapshotId:guid}", async (Guid snapshotId, YoteiDbContext db) =>
+        app.MapDelete("/snapshots/{snapshotId:guid}", async (
+            Guid snapshotId,
+            TenantContext tenantContext,
+            YoteiDbContext db) =>
         {
             var snapshot = await db.PullRequestSnapshots
                 .Include(s => s.FileChanges)
-                .FirstOrDefaultAsync(s => s.Id == snapshotId);
+                .FirstOrDefaultAsync(s => s.Id == snapshotId && s.TenantId == tenantContext.TenantId);
 
             if (snapshot is null)
             {

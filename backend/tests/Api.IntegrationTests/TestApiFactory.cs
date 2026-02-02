@@ -7,17 +7,25 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Yotei.Api.Data;
+using Yotei.Api.Models;
 using Yotei.Api.Storage;
 
 namespace Api.IntegrationTests;
 
 public class TestApiFactory : WebApplicationFactory<Program>
 {
+    private const string TenantToken = "test-tenant-token";
     private readonly string _databaseName = $"yotei-tests-{Guid.NewGuid()}";
     private readonly InMemoryDatabaseRoot _databaseRoot = new();
     private readonly ServiceProvider _internalProvider = new ServiceCollection()
         .AddEntityFrameworkInMemoryDatabase()
         .BuildServiceProvider();
+
+    // Adds the test tenant header to all requests.
+    protected override void ConfigureClient(HttpClient client)
+    {
+        client.DefaultRequestHeaders.Add("X-Tenant-Token", TenantToken);
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -44,6 +52,21 @@ public class TestApiFactory : WebApplicationFactory<Program>
 
             services.RemoveAll<IRawDiffStorage>();
             services.AddSingleton<IRawDiffStorage>(new FakeRawDiffStorage());
+
+            using var provider = services.BuildServiceProvider();
+            using var scope = provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<YoteiDbContext>();
+            db.Database.EnsureCreated();
+            if (!db.Tenants.Any())
+            {
+                db.Tenants.Add(new Tenant
+                {
+                    Name = "Test Tenant",
+                    Slug = "test-tenant",
+                    Token = TenantToken
+                });
+                db.SaveChanges();
+            }
         });
     }
 
