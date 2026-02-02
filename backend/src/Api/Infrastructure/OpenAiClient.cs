@@ -16,6 +16,7 @@ public record OpenAiSettings
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = string.Empty;
     public string BaseUrl { get; init; } = "https://api.openai.com/v1/";
+    public double? Temperature { get; init; } = 1;
     public int TimeoutSeconds { get; init; } = 30;
     public int MaxRetries { get; init; } = 3;
 }
@@ -291,7 +292,7 @@ public sealed class OpenAiClient : IOpenAiClient
                 new OpenAiChatMessage("user", userPrompt)
             ],
             BehaviourSummaryFormat,
-            0.2);
+            _settings.Temperature);
     }
 
     // Builds the request payload for the OpenAI chat completions endpoint for questions.
@@ -313,7 +314,7 @@ public sealed class OpenAiClient : IOpenAiClient
                 new OpenAiChatMessage("user", userPrompt)
             ],
             ReviewerQuestionsFormat,
-            0.2);
+            _settings.Temperature);
     }
 
     // Builds the request payload for the OpenAI chat completions endpoint for review summaries.
@@ -333,7 +334,7 @@ public sealed class OpenAiClient : IOpenAiClient
                 new OpenAiChatMessage("user", userPrompt)
             ],
             ReviewSummaryFormat,
-            0.2);
+            _settings.Temperature);
     }
 
     // Builds the prompt body including file path, diff, and risk evidence.
@@ -650,7 +651,8 @@ Diff:
         [property: JsonPropertyName("model")] string Model,
         [property: JsonPropertyName("messages")] IReadOnlyList<OpenAiChatMessage> Messages,
         [property: JsonPropertyName("response_format")] OpenAiResponseFormat ResponseFormat,
-        [property: JsonPropertyName("temperature")] double Temperature);
+        [property: JsonPropertyName("temperature"),
+         JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Temperature);
 
     private sealed record OpenAiChatMessage(
         [property: JsonPropertyName("role")] string Role,
