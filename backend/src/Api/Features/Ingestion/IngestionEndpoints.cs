@@ -1,8 +1,11 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Yotei.Api.Data;
-using Yotei.Api.Models;
 using Yotei.Api.Features.Tenancy;
+using Yotei.Api.Infrastructure;
+using Yotei.Api.Models;
 
 namespace Yotei.Api.Features.Ingestion;
 
@@ -121,6 +124,7 @@ public static class IngestionEndpoints
             HttpRequest request,
             IGithubIngestionService ingestionService,
             TenantProvisioningService provisioningService,
+            IOptions<FrontendSettings> frontendOptions,
             IConfiguration configuration,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
@@ -151,6 +155,7 @@ public static class IngestionEndpoints
                     payload,
                     ingestionService,
                     provisioningService,
+                    frontendOptions,
                     logger,
                     cancellationToken),
                 _ => Results.Ok(new { ignored = eventName })
@@ -179,6 +184,7 @@ public static class IngestionEndpoints
         string payload,
         IGithubIngestionService ingestionService,
         TenantProvisioningService provisioningService,
+        IOptions<FrontendSettings> frontendOptions,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -216,6 +222,35 @@ public static class IngestionEndpoints
             return Results.Problem(detail: string.Join(" | ", result.Errors));
         }
 
+        if (ShouldPostPullRequestComment(action, result.Created))
+        {
+            var commentBody = BuildYoteiPullRequestCommentBody(frontendOptions.Value, tenant, prNumber);
+            if (commentBody is null)
+            {
+                logger.LogWarning(
+                    "Skipping GitHub comment because frontend URL or tenant token is missing for {Owner}/{Repo} PR #{PrNumber}.",
+                    owner,
+                    name,
+                    prNumber);
+            }
+            else
+            {
+                var commentResult = await ingestionService.PostPullRequestCommentAsync(
+                    new GitHubPullRequestCommentRequest(owner, name, prNumber, commentBody),
+                    installationId,
+                    cancellationToken);
+
+                if (!commentResult)
+                {
+                    logger.LogWarning(
+                        "GitHub comment failed for {Owner}/{Repo} PR #{PrNumber}.",
+                        owner,
+                        name,
+                        prNumber);
+                }
+            }
+        }
+
         return Results.Ok(new { snapshotId = result.SnapshotId, created = result.Created });
     }
 
@@ -230,6 +265,60 @@ public static class IngestionEndpoints
             "ready_for_review" => true,
             _ => false
         };
+    }
+
+    // Determines whether a pull request webhook should post the Yotei comment for newly opened PRs.
+    private static bool ShouldPostPullRequestComment(string? action, bool created)
+    {
+        return (action?.ToLowerInvariant(), created) switch
+        {
+            ("opened", true) => true,
+            _ => false
+        };
+    }
+
+    // Builds the PR comment body that links to the Yotei frontend and displays the logo.
+    private static string? BuildYoteiPullRequestCommentBody(
+        FrontendSettings frontendSettings,
+        Tenant tenant,
+        int prNumber)
+    {
+        if (tenant is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(tenant.Token))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(frontendSettings.BaseUrl))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(frontendSettings.BaseUrl, UriKind.Absolute, out var baseUri))
+        {
+            return null;
+        }
+
+        var baseUrl = baseUri.AbsoluteUri.TrimEnd('/');
+        var dashboardUrl = QueryHelpers.AddQueryString(baseUrl, new Dictionary<string, string?>
+        {
+            ["tenant"] = tenant.Token,
+            ["view"] = "dashboard"
+        });
+        var logoUrl = new Uri(baseUri, "yotei-logo.png").ToString();
+
+        var lines = new[]
+        {
+            $"[![Yotei]({logoUrl})]({dashboardUrl})",
+            string.Empty,
+            $"View Yotei recommendations for PR #{prNumber}: {dashboardUrl}"
+        };
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     // Parses pull request webhook payload details.

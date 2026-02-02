@@ -34,6 +34,18 @@ public interface IGithubIngestionService
     /// <param name="cancellationToken">Cancellation token for async operations.</param>
     /// <returns>The sync result describing processed repositories and snapshots.</returns>
     Task<GitHubSyncResult> SyncConfiguredReposAsync(Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Posts a comment on a GitHub pull request.
+    /// </summary>
+    /// <param name="request">The pull request comment request.</param>
+    /// <param name="installationId">Optional GitHub installation identifier for app auth.</param>
+    /// <param name="cancellationToken">Cancellation token for async operations.</param>
+    /// <returns>True when the comment was accepted by GitHub.</returns>
+    Task<bool> PostPullRequestCommentAsync(
+        GitHubPullRequestCommentRequest request,
+        long? installationId,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -237,6 +249,61 @@ public sealed class GithubIngestionService : IGithubIngestionService
         return new GitHubSyncResult(repositories, pullRequests, snapshotsCreated, errors);
     }
 
+    /// <inheritdoc />
+    public async Task<bool> PostPullRequestCommentAsync(
+        GitHubPullRequestCommentRequest request,
+        long? installationId,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            throw new ArgumentNullException(nameof(request));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Owner) ||
+            string.IsNullOrWhiteSpace(request.Name) ||
+            request.PrNumber <= 0)
+        {
+            _logger.LogWarning(
+                "GitHub comment request is missing repo details (Owner: {Owner}, Repo: {Repo}, PR: {PrNumber}).",
+                request.Owner,
+                request.Name,
+                request.PrNumber);
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Body))
+        {
+            _logger.LogWarning(
+                "GitHub comment body is empty for {Owner}/{Repo} PR #{PrNumber}.",
+                request.Owner,
+                request.Name,
+                request.PrNumber);
+            return false;
+        }
+
+        var url = $"/repos/{request.Owner}/{request.Name}/issues/{request.PrNumber}/comments";
+        var response = await SendJsonAsync(
+            HttpMethod.Post,
+            url,
+            new { body = request.Body },
+            installationId,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "GitHub comment post failed for {Owner}/{Repo} PR #{PrNumber} with status {StatusCode}.",
+                request.Owner,
+                request.Name,
+                request.PrNumber,
+                response.StatusCode);
+            return false;
+        }
+
+        return true;
+    }
+
     // Sends an authenticated request to the GitHub API.
     private async Task<HttpResponseMessage> SendAsync(
         HttpMethod method,
@@ -245,6 +312,22 @@ public sealed class GithubIngestionService : IGithubIngestionService
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(method, url);
+        await _accessTokenProvider.ApplyAuthenticationAsync(request, installationId, cancellationToken);
+        return await _httpClient.SendAsync(request, cancellationToken);
+    }
+
+    // Sends an authenticated request with JSON content to the GitHub API.
+    private async Task<HttpResponseMessage> SendJsonAsync<TPayload>(
+        HttpMethod method,
+        string url,
+        TPayload payload,
+        long? installationId,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(method, url)
+        {
+            Content = JsonContent.Create(payload)
+        };
         await _accessTokenProvider.ApplyAuthenticationAsync(request, installationId, cancellationToken);
         return await _httpClient.SendAsync(request, cancellationToken);
     }

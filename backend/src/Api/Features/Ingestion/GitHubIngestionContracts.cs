@@ -9,6 +9,15 @@ namespace Yotei.Api.Features.Ingestion;
 public record GitHubIngestRequest(string Owner, string Name, int PrNumber);
 
 /// <summary>
+/// Request payload for posting a GitHub pull request comment.
+/// </summary>
+/// <param name="Owner">The repository owner.</param>
+/// <param name="Name">The repository name.</param>
+/// <param name="PrNumber">The pull request number.</param>
+/// <param name="Body">The comment body to post.</param>
+public record GitHubPullRequestCommentRequest(string Owner, string Name, int PrNumber, string Body);
+
+/// <summary>
 /// API response describing the ingestion result.
 /// </summary>
 /// <param name="SnapshotId">The snapshot identifier created or reused.</param>
