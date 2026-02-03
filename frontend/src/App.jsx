@@ -21,6 +21,8 @@ export default function App() {
     localStorage.getItem("yoteiTenantToken") ? "dashboard" : "setup"
   );
   const [selectedId, setSelectedId] = useState(null);
+  const [pendingPrLookup, setPendingPrLookup] = useState(null);
+  const [autoResolveLatest, setAutoResolveLatest] = useState(false);
   const [detail, setDetail] = useState(null);
   const [fileChanges, setFileChanges] = useState([]);
   const [selectedChange, setSelectedChange] = useState(null);
@@ -106,6 +108,15 @@ export default function App() {
     const viewParam = params.get("view");
     const sessionParam =
       params.get("session") ?? params.get("snapshot") ?? params.get("sessionId");
+    const ownerParam = params.get("owner") ?? params.get("repoOwner");
+    const nameParam = params.get("name") ?? params.get("repo");
+    const prParam = params.get("pr") ?? params.get("prNumber");
+    const parsedPrNumber = prParam ? Number(prParam) : null;
+    const hasValidPrLookup =
+      ownerParam &&
+      nameParam &&
+      Number.isFinite(parsedPrNumber) &&
+      parsedPrNumber > 0;
     let updated = false;
 
     if (tokenParam) {
@@ -119,14 +130,26 @@ export default function App() {
       updated = true;
     }
 
-    if (sessionParam) {
+    if (hasValidPrLookup) {
+      setPendingPrLookup({
+        owner: ownerParam,
+        name: nameParam,
+        prNumber: parsedPrNumber
+      });
+      updated = true;
+    } else if (sessionParam) {
       setSelectedId(sessionParam);
+      setAutoResolveLatest(true);
       updated = true;
     }
 
     if (updated) {
       const nextParams = new URLSearchParams();
-      if (sessionParam) {
+      if (hasValidPrLookup) {
+        nextParams.set("owner", ownerParam);
+        nextParams.set("name", nameParam);
+        nextParams.set("prNumber", String(parsedPrNumber));
+      } else if (sessionParam) {
         nextParams.set("session", sessionParam);
       }
       const nextUrl = nextParams.toString()
@@ -135,6 +158,13 @@ export default function App() {
       window.history.replaceState(null, "", nextUrl);
     }
   }, []);
+
+  useEffect(() => {
+    if (!tenantToken || !pendingPrLookup) {
+      return;
+    }
+    resolveLatestSession(pendingPrLookup);
+  }, [tenantToken, pendingPrLookup]);
 
   useEffect(() => {
     const handleStorage = (event) => {
@@ -204,6 +234,39 @@ export default function App() {
       }
       const data = await res.json();
       setDetail(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resolveLatestSession = async (lookup) => {
+    if (!lookup?.owner || !lookup?.name || !lookup?.prNumber) {
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({
+        owner: lookup.owner,
+        name: lookup.name,
+        prNumber: String(lookup.prNumber)
+      });
+      const res = await apiFetch(`${apiBase}/review-sessions/latest?${params.toString()}`);
+      if (res.status === 404) {
+        if (!selectedId) {
+          setError("No review session found for this pull request yet.");
+        }
+        return;
+      }
+      if (!res.ok) {
+        throw new Error("Failed to resolve latest review session");
+      }
+      const data = await res.json();
+      if (data?.id) {
+        setSelectedId(data.id);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -912,6 +975,18 @@ export default function App() {
       fetchTranscript(selectedId);
     }
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!autoResolveLatest || !detail) {
+      return;
+    }
+    resolveLatestSession({
+      owner: detail.owner,
+      name: detail.name,
+      prNumber: detail.prNumber
+    });
+    setAutoResolveLatest(false);
+  }, [autoResolveLatest, detail]);
 
   useEffect(() => {
     if (selectedId) {

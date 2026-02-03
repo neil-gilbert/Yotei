@@ -51,3 +51,9 @@ public record GitHubIngestResult(Guid? SnapshotId, bool Created, int FileChanges
 /// <param name="SnapshotsCreated">Number of snapshots created during sync.</param>
 /// <param name="Errors">Errors captured during sync.</param>
 public record GitHubSyncResult(int Repositories, int PullRequests, int SnapshotsCreated, List<string> Errors);
+
+// Provides the marker used to find the Yotei pull request comment for updates.
+internal static class GitHubCommentMarkers
+{
+    public const string YoteiReviewLink = "<!-- yotei:review-link -->";
+}

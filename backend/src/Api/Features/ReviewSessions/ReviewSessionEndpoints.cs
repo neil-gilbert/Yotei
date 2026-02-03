@@ -95,6 +95,68 @@ public static class ReviewSessionEndpoints
             return Results.Ok(response);
         });
 
+        // Fetch the most recent review session for a pull request.
+        app.MapGet("/review-sessions/latest", async (
+            string? owner,
+            string? name,
+            int? prNumber,
+            TenantContext tenantContext,
+            YoteiDbContext db) =>
+        {
+            var errors = new List<string>();
+
+            if (string.IsNullOrWhiteSpace(owner))
+            {
+                errors.Add("owner is required");
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                errors.Add("name is required");
+            }
+
+            if (prNumber is null || prNumber <= 0)
+            {
+                errors.Add("prNumber must be greater than 0");
+            }
+
+            if (errors.Count > 0)
+            {
+                return Results.BadRequest(new { errors });
+            }
+
+            var snapshot = await db.PullRequestSnapshots
+                .AsNoTracking()
+                .Include(s => s.Repository)
+                .Where(s => s.TenantId == tenantContext.TenantId &&
+                            s.Repository != null &&
+                            s.Repository.Owner == owner &&
+                            s.Repository.Name == name &&
+                            s.PrNumber == prNumber)
+                .OrderByDescending(s => s.IngestedAt)
+                .ThenByDescending(s => s.Id)
+                .FirstOrDefaultAsync();
+
+            if (snapshot is null)
+            {
+                return Results.NotFound(new { error = "review session not found" });
+            }
+
+            var response = new ReviewSessionDetail(
+                snapshot.Id,
+                snapshot.Repository!.Owner,
+                snapshot.Repository.Name,
+                snapshot.PrNumber,
+                snapshot.BaseSha,
+                snapshot.HeadSha,
+                snapshot.Title,
+                snapshot.Source,
+                snapshot.Repository.DefaultBranch,
+                snapshot.IngestedAt);
+
+            return Results.Ok(response);
+        });
+
         // Build or rebuild the review summary, tree, and explanations.
         app.MapPost("/review-sessions/{sessionId:guid}/build", async (
             Guid sessionId,

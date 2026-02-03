@@ -46,6 +46,18 @@ public interface IGithubIngestionService
         GitHubPullRequestCommentRequest request,
         long? installationId,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Posts or updates the Yotei comment on a GitHub pull request.
+    /// </summary>
+    /// <param name="request">The pull request comment request.</param>
+    /// <param name="installationId">Optional GitHub installation identifier for app auth.</param>
+    /// <param name="cancellationToken">Cancellation token for async operations.</param>
+    /// <returns>True when the comment was accepted by GitHub.</returns>
+    Task<bool> UpsertPullRequestCommentAsync(
+        GitHubPullRequestCommentRequest request,
+        long? installationId,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -54,6 +66,7 @@ public interface IGithubIngestionService
 public sealed class GithubIngestionService : IGithubIngestionService
 {
     private const int PageSize = 100;
+    private const string CommentMarker = GitHubCommentMarkers.YoteiReviewLink;
     private readonly HttpClient _httpClient;
     private readonly YoteiDbContext _dbContext;
     private readonly IRawDiffStorage _rawDiffStorage;
@@ -255,6 +268,40 @@ public sealed class GithubIngestionService : IGithubIngestionService
         long? installationId,
         CancellationToken cancellationToken)
     {
+        if (!IsValidPullRequestCommentRequest(request))
+        {
+            return false;
+        }
+
+        var created = await CreatePullRequestCommentAsync(request, installationId, cancellationToken);
+        return created;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UpsertPullRequestCommentAsync(
+        GitHubPullRequestCommentRequest request,
+        long? installationId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsValidPullRequestCommentRequest(request))
+        {
+            return false;
+        }
+
+        var existingComment = await FindExistingYoteiCommentAsync(request, installationId, cancellationToken);
+        if (existingComment is null)
+        {
+            var created = await CreatePullRequestCommentAsync(request, installationId, cancellationToken);
+            return created;
+        }
+
+        var updated = await UpdatePullRequestCommentAsync(existingComment.Id, request, installationId, cancellationToken);
+        return updated;
+    }
+
+    // Validates the pull request comment request before sending to GitHub.
+    private bool IsValidPullRequestCommentRequest(GitHubPullRequestCommentRequest request)
+    {
         if (request is null)
         {
             throw new ArgumentNullException(nameof(request));
@@ -282,6 +329,15 @@ public sealed class GithubIngestionService : IGithubIngestionService
             return false;
         }
 
+        return true;
+    }
+
+    // Creates a new GitHub pull request comment.
+    private async Task<bool> CreatePullRequestCommentAsync(
+        GitHubPullRequestCommentRequest request,
+        long? installationId,
+        CancellationToken cancellationToken)
+    {
         var url = $"/repos/{request.Owner}/{request.Name}/issues/{request.PrNumber}/comments";
         var response = await SendJsonAsync(
             HttpMethod.Post,
@@ -302,6 +358,106 @@ public sealed class GithubIngestionService : IGithubIngestionService
         }
 
         return true;
+    }
+
+    // Updates an existing GitHub pull request comment.
+    private async Task<bool> UpdatePullRequestCommentAsync(
+        long commentId,
+        GitHubPullRequestCommentRequest request,
+        long? installationId,
+        CancellationToken cancellationToken)
+    {
+        if (commentId <= 0)
+        {
+            _logger.LogWarning(
+                "GitHub comment update skipped for {Owner}/{Repo} PR #{PrNumber} because the comment id is invalid.",
+                request.Owner,
+                request.Name,
+                request.PrNumber);
+            return false;
+        }
+
+        var url = $"/repos/{request.Owner}/{request.Name}/issues/comments/{commentId}";
+        var response = await SendJsonAsync(
+            HttpMethod.Patch,
+            url,
+            new { body = request.Body },
+            installationId,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "GitHub comment update failed for {Owner}/{Repo} PR #{PrNumber} with status {StatusCode}.",
+                request.Owner,
+                request.Name,
+                request.PrNumber,
+                response.StatusCode);
+            return false;
+        }
+
+        return true;
+    }
+
+    // Finds an existing Yotei comment for a pull request so it can be updated.
+    private async Task<GithubIssueComment?> FindExistingYoteiCommentAsync(
+        GitHubPullRequestCommentRequest request,
+        long? installationId,
+        CancellationToken cancellationToken)
+    {
+        var page = 1;
+        GithubIssueComment? latestMatch = null;
+
+        while (true)
+        {
+            var url = $"/repos/{request.Owner}/{request.Name}/issues/{request.PrNumber}/comments?per_page={PageSize}&page={page}";
+            var response = await SendAsync(HttpMethod.Get, url, installationId, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "GitHub comment list fetch failed for {Owner}/{Repo} PR #{PrNumber} with status {StatusCode}.",
+                    request.Owner,
+                    request.Name,
+                    request.PrNumber,
+                    response.StatusCode);
+                return null;
+            }
+
+            var batch = await response.Content.ReadFromJsonAsync<List<GithubIssueComment>>(cancellationToken: cancellationToken);
+            if (batch is null || batch.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var comment in batch)
+            {
+                if (IsYoteiComment(comment.Body))
+                {
+                    latestMatch = comment;
+                }
+            }
+
+            if (batch.Count < PageSize)
+            {
+                break;
+            }
+
+            page += 1;
+        }
+
+        return latestMatch;
+    }
+
+    // Determines whether a comment body belongs to Yotei.
+    private static bool IsYoteiComment(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return false;
+        }
+
+        var hasMarker = body.Contains(CommentMarker, StringComparison.OrdinalIgnoreCase);
+        return hasMarker;
     }
 
     // Sends an authenticated request to the GitHub API.
@@ -615,6 +771,10 @@ public sealed class GithubIngestionService : IGithubIngestionService
     }
 
     private sealed record RepoDefinition(string Owner, string Name, int? PrNumber);
+
+    private sealed record GithubIssueComment(
+        [property: JsonPropertyName("id")] long Id,
+        [property: JsonPropertyName("body")] string? Body);
 
     private sealed record GithubPullRequest(
         int Number,

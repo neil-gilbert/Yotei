@@ -222,11 +222,13 @@ public static class IngestionEndpoints
             return Results.Problem(detail: string.Join(" | ", result.Errors));
         }
 
-        if (ShouldPostPullRequestComment(action, result.Created))
+        if (ShouldPostPullRequestComment(action))
         {
             var commentBody = BuildYoteiPullRequestCommentBody(
                 frontendOptions.Value,
                 tenant,
+                owner,
+                name,
                 prNumber,
                 result.SnapshotId.Value);
             if (commentBody is null)
@@ -239,7 +241,7 @@ public static class IngestionEndpoints
             }
             else
             {
-                var commentResult = await ingestionService.PostPullRequestCommentAsync(
+                var commentResult = await ingestionService.UpsertPullRequestCommentAsync(
                     new GitHubPullRequestCommentRequest(owner, name, prNumber, commentBody),
                     installationId,
                     cancellationToken);
@@ -271,12 +273,15 @@ public static class IngestionEndpoints
         };
     }
 
-    // Determines whether a pull request webhook should post the Yotei comment for newly opened PRs.
-    private static bool ShouldPostPullRequestComment(string? action, bool created)
+    // Determines whether a pull request webhook should post or update the Yotei comment.
+    private static bool ShouldPostPullRequestComment(string? action)
     {
-        return (action?.ToLowerInvariant(), created) switch
+        return action?.ToLowerInvariant() switch
         {
-            ("opened", true) => true,
+            "opened" => true,
+            "reopened" => true,
+            "synchronize" => true,
+            "ready_for_review" => true,
             _ => false
         };
     }
@@ -285,6 +290,8 @@ public static class IngestionEndpoints
     private static string? BuildYoteiPullRequestCommentBody(
         FrontendSettings frontendSettings,
         Tenant tenant,
+        string owner,
+        string name,
         int prNumber,
         Guid snapshotId)
     {
@@ -299,6 +306,11 @@ public static class IngestionEndpoints
         }
 
         if (string.IsNullOrWhiteSpace(frontendSettings.BaseUrl))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(name))
         {
             return null;
         }
@@ -318,12 +330,15 @@ public static class IngestionEndpoints
         {
             ["tenant"] = tenant.Token,
             ["view"] = "dashboard",
-            ["session"] = snapshotId.ToString()
+            ["owner"] = owner,
+            ["name"] = name,
+            ["prNumber"] = prNumber.ToString()
         });
         var logoUrl = new Uri(baseUri, "yotei-logo.png").ToString();
 
         var lines = new[]
         {
+            GitHubCommentMarkers.YoteiReviewLink,
             $"[![Yotei]({logoUrl})]({dashboardUrl})",
             string.Empty,
             $"View Yotei recommendations for PR #{prNumber}: {dashboardUrl}"

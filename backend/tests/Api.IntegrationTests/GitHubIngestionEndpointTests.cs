@@ -81,7 +81,7 @@ public class GitHubIngestionEndpointTests
         await using var factory = new GitHubApiFactory();
         using var client = factory.CreateClient();
 
-        var payload = BuildPullRequestWebhookPayload(GitHubApiFactory.WebhookInstallationId, 42);
+        var payload = BuildPullRequestWebhookPayload(GitHubApiFactory.WebhookInstallationId, 42, "opened");
         var signature = ComputeSignature(WebhookSecret, payload);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "/ingest/github/webhook")
@@ -103,12 +103,55 @@ public class GitHubIngestionEndpointTests
         Assert.Contains("https://yotei.example", commentBody, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("yotei-logo.png", commentBody, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("tenant=test-tenant-token", commentBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("owner=acme", commentBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("name=payments", commentBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prNumber=42", commentBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("session=", commentBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("<!-- yotei:review-link -->", commentBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Given a pull_request synchronize webhook with an existing Yotei comment, when processed, then the comment is updated.
+    [Fact]
+    public async Task Given_PullRequestSynchronizeWebhook_When_Processed_Then_CommentUpdated()
+    {
+        await using var factory = new GitHubApiFactory();
+        factory.GitHubHandler.SeedIssueComment(99, "<!-- yotei:review-link -->\nOld link");
+        using var client = factory.CreateClient();
+
+        var payload = BuildPullRequestWebhookPayload(GitHubApiFactory.WebhookInstallationId, 42, "synchronize");
+        var signature = ComputeSignature(WebhookSecret, payload);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/ingest/github/webhook")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Add("X-GitHub-Event", "pull_request");
+        request.Headers.Add("X-Hub-Signature-256", $"sha256={signature}");
+
+        var response = await client.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException($"GitHub webhook failed: {(int)response.StatusCode} {response.ReasonPhrase} {body}");
+        }
+
+        var updatedBody = factory.GitHubHandler.UpdatedCommentBodies.SingleOrDefault();
+        Assert.False(string.IsNullOrWhiteSpace(updatedBody));
+        Assert.Contains("https://yotei.example", updatedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("yotei-logo.png", updatedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("tenant=test-tenant-token", updatedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("owner=acme", updatedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("name=payments", updatedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prNumber=42", updatedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("session=", updatedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("<!-- yotei:review-link -->", updatedBody, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record GitHubIngestResponse(Guid SnapshotId, bool Created, int FileChangesCount);
     private sealed record GitHubSyncResponse(int Repositories, int PullRequests, int SnapshotsCreated, List<string> Errors);
     private sealed record SnapshotDetail(Guid Id, List<FileChangeItem> FileChanges);
     private sealed record FileChangeItem(string Path, string ChangeType, int AddedLines, int DeletedLines, string? RawDiffRef);
+    private sealed record GitHubIssueCommentFixture(long Id, string Body);
 
     private sealed class GitHubApiFactory : WebApplicationFactory<Program>
     {
@@ -226,8 +269,17 @@ public class GitHubIngestionEndpointTests
     private sealed class StubGitHubHandler : HttpMessageHandler
     {
         private readonly ConcurrentBag<string> _commentBodies = new();
+        private readonly ConcurrentBag<string> _updatedCommentBodies = new();
+        private readonly ConcurrentBag<GitHubIssueCommentFixture> _issueComments = new();
 
         public IReadOnlyCollection<string> CommentBodies => _commentBodies.ToArray();
+        public IReadOnlyCollection<string> UpdatedCommentBodies => _updatedCommentBodies.ToArray();
+
+        // Adds an existing issue comment so the handler can simulate updates.
+        public void SeedIssueComment(long id, string body)
+        {
+            _issueComments.Add(new GitHubIssueCommentFixture(id, body));
+        }
 
         // Returns canned responses for GitHub API endpoints.
         protected override async Task<HttpResponseMessage> SendAsync(
@@ -259,6 +311,43 @@ public class GitHubIngestionEndpointTests
                 return new HttpResponseMessage(HttpStatusCode.Created)
                 {
                     Content = new StringContent("{\"id\":1}", Encoding.UTF8, "application/json")
+                };
+            }
+
+            if (request.Method == HttpMethod.Patch &&
+                path.Contains("/issues/comments/", StringComparison.OrdinalIgnoreCase))
+            {
+                var payload = request.Content is null
+                    ? string.Empty
+                    : await request.Content.ReadAsStringAsync(cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(payload))
+                {
+                    using var document = JsonDocument.Parse(payload);
+                    if (document.RootElement.TryGetProperty("body", out var bodyElement))
+                    {
+                        var body = bodyElement.GetString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(body))
+                        {
+                            _updatedCommentBodies.Add(body);
+                        }
+                    }
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"id\":99}", Encoding.UTF8, "application/json")
+                };
+            }
+
+            if (request.Method == HttpMethod.Get &&
+                path.Contains("/issues/", StringComparison.OrdinalIgnoreCase) &&
+                path.EndsWith("/comments", StringComparison.OrdinalIgnoreCase))
+            {
+                var body = JsonSerializer.Serialize(_issueComments.ToArray());
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
                 };
             }
 
@@ -309,12 +398,12 @@ public class GitHubIngestionEndpointTests
             "[{\"number\":77,\"base\":{\"sha\":\"base-77\",\"ref\":\"main\"},\"head\":{\"sha\":\"head-77\",\"ref\":\"feature\"}}]";
     }
 
-    // Builds a minimal webhook payload for a pull_request opened event.
-    private static string BuildPullRequestWebhookPayload(long installationId, int prNumber)
+    // Builds a minimal webhook payload for a pull_request event.
+    private static string BuildPullRequestWebhookPayload(long installationId, int prNumber, string action)
     {
         var payload = new
         {
-            action = "opened",
+            action,
             pull_request = new { number = prNumber },
             repository = new
             {

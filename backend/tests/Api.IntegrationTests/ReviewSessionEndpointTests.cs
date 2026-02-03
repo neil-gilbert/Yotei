@@ -59,14 +59,33 @@ public class ReviewSessionEndpointTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    // Returns the most recent review session for a pull request.
+    [Fact]
+    public async Task ReviewSession_Latest_Returns_MostRecent_Snapshot()
+    {
+        await using var factory = new TestApiFactory();
+        using var client = factory.CreateClient();
+
+        var firstSnapshotId = await CreateSnapshotAsync(client, prNumber: 42);
+        await Task.Delay(5);
+        var secondSnapshotId = await CreateSnapshotAsync(client, prNumber: 42);
+
+        var response = await client.GetFromJsonAsync<ReviewSessionDetail>(
+            "/review-sessions/latest?owner=acme&name=payments&prNumber=42");
+
+        Assert.NotNull(response);
+        Assert.Equal(secondSnapshotId, response!.Id);
+        Assert.NotEqual(firstSnapshotId, response.Id);
+    }
+
     // Creates a snapshot for review session tests.
-    private static async Task<Guid> CreateSnapshotAsync(HttpClient client)
+    private static async Task<Guid> CreateSnapshotAsync(HttpClient client, int prNumber = 11)
     {
         var request = new
         {
             owner = "acme",
             name = "payments",
-            prNumber = 11,
+            prNumber,
             baseSha = "base",
             headSha = Guid.NewGuid().ToString("N"),
             defaultBranch = "main",
@@ -101,6 +120,7 @@ public class ReviewSessionEndpointTests
     }
 
     private sealed record IngestResponse(Guid SnapshotId, bool Created);
+    private sealed record ReviewSessionDetail(Guid Id);
     private sealed record ReviewSummaryResponse(int ChangedFilesCount);
     private sealed record ReviewTreeResponse(List<ReviewNode> Nodes);
     private sealed record ReviewNode(Guid Id, string NodeType, List<string> RiskTags);
