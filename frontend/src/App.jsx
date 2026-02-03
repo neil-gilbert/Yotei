@@ -20,7 +20,6 @@ export default function App() {
   const [activeView, setActiveView] = useState(() =>
     localStorage.getItem("yoteiTenantToken") ? "dashboard" : "setup"
   );
-  const [snapshots, setSnapshots] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [fileChanges, setFileChanges] = useState([]);
@@ -78,11 +77,8 @@ export default function App() {
   const [insightsScope, setInsightsScope] = useState("org");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const limit = 10;
-  const [offset, setOffset] = useState(0);
   const [changeTypeFilter, setChangeTypeFilter] = useState("");
   const [pathPrefixFilter, setPathPrefixFilter] = useState("");
-  const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState("");
   const recognitionRef = useRef(null);
   const normalizedApiBase = useMemo(() => apiBase.replace(/\/+$/, ""), [apiBase]);
@@ -108,6 +104,8 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const tokenParam = params.get("tenant") ?? params.get("tenantToken");
     const viewParam = params.get("view");
+    const sessionParam =
+      params.get("session") ?? params.get("snapshot") ?? params.get("sessionId");
     let updated = false;
 
     if (tokenParam) {
@@ -121,8 +119,20 @@ export default function App() {
       updated = true;
     }
 
+    if (sessionParam) {
+      setSelectedId(sessionParam);
+      updated = true;
+    }
+
     if (updated) {
-      window.history.replaceState(null, "", window.location.pathname);
+      const nextParams = new URLSearchParams();
+      if (sessionParam) {
+        nextParams.set("session", sessionParam);
+      }
+      const nextUrl = nextParams.toString()
+        ? `${window.location.pathname}?${nextParams.toString()}`
+        : window.location.pathname;
+      window.history.replaceState(null, "", nextUrl);
     }
   }, []);
 
@@ -168,26 +178,16 @@ export default function App() {
     setActiveView("setup");
   };
 
-  const fetchSnapshots = async (nextOffset = offset, nextLimit = limit) => {
-    setLoading(true);
-    setError("");
-    try {
-      const res = await apiFetch(
-        `${apiBase}/review-sessions?limit=${nextLimit}&offset=${nextOffset}`
-      );
-      if (!res.ok) {
-        throw new Error("Failed to load review sessions");
-      }
-      const data = await res.json();
-      setSnapshots(data);
-      if (!selectedId && data.length > 0) {
-        setSelectedId(data[0].id);
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+  const refreshSession = () => {
+    if (!selectedId) {
+      return;
     }
+    fetchDetail(selectedId);
+    fetchFileChanges(selectedId);
+    fetchChangeTree(selectedId);
+    fetchSummary(selectedId);
+    fetchFlowGraph(selectedId);
+    fetchTranscript(selectedId);
   };
 
   const fetchDetail = async (sessionId) => {
@@ -807,8 +807,6 @@ export default function App() {
       setFlowGraph({ nodes: [], edges: [] });
       setFlowStatus("idle");
       setFlowError("");
-      await fetchSnapshots(0, limit);
-      setOffset(0);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -854,10 +852,6 @@ export default function App() {
     return () => {
       recognition.stop();
     };
-  }, []);
-
-  useEffect(() => {
-    fetchSnapshots();
   }, []);
 
   const activeSnapshotName = useMemo(() => {
@@ -920,10 +914,6 @@ export default function App() {
   }, [selectedId]);
 
   useEffect(() => {
-    fetchSnapshots(offset, limit);
-  }, [limit, offset]);
-
-  useEffect(() => {
     if (selectedId) {
       fetchFileChanges(selectedId);
     }
@@ -983,14 +973,6 @@ export default function App() {
       }
     }
   }, [selectedNode, selectedId]);
-
-  const handlePrev = () => {
-    setOffset((current) => Math.max(0, current - limit));
-  };
-
-  const handleNext = () => {
-    setOffset((current) => current + limit);
-  };
 
   const treeLookup = useMemo(() => {
     const byParent = new Map();
@@ -1601,7 +1583,7 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               </div>
               <ul className="setup__list">
                 <li>Push commits to your PR to trigger sync.</li>
-                <li>Refresh the dashboard to see the session.</li>
+                <li>Open the PR comment link to load the session.</li>
               </ul>
             </article>
           )}
@@ -1610,7 +1592,7 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
         <div className="setup__footer card">
           <div>
             <h3>Test it fast</h3>
-            <p>Open or update a PR, then watch it appear in the review sessions list.</p>
+            <p>Open or update a PR, then use the PR comment link to view the review session.</p>
           </div>
           {isAdminSetup ? (
             <div className="setup__footer-actions">
@@ -1756,7 +1738,7 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
         )}
         {insightsStatus === "idle" && insightsScope === "repo" && !detail && (
           <section className="card insights-state">
-            Select a review session on the dashboard to scope insights to a repository.
+            Open a review session to scope insights to a repository.
           </section>
         )}
         {insightsStatus === "ready" && orgInsights && (
@@ -1917,7 +1899,11 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
           </div>
           {activeView === "dashboard" ? (
             <>
-              <button className="button ghost" onClick={() => fetchSnapshots()} disabled={loading}>
+              <button
+                className="button ghost"
+                onClick={refreshSession}
+                disabled={loading || !selectedId}
+              >
                 Refresh
               </button>
               <button
@@ -1955,83 +1941,15 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
       ) : (
         <>
           {error && <div className="alert">{error}</div>}
-          <main className={`app__content ${sessionsCollapsed ? "app__content--collapsed" : ""}`}>
-            <aside className={`sidebar ${sessionsCollapsed ? "sidebar--collapsed" : ""}`}>
-              <section className={`card sessions ${sessionsCollapsed ? "card--collapsed" : ""}`}>
-                <div className="card__header">
-                  <h2>Review Sessions</h2>
-                  <div className="card__actions">
-                    <button
-                      className="button ghost icon-button"
-                      onClick={() => setSessionsCollapsed((current) => !current)}
-                      aria-label={sessionsCollapsed ? "Expand review sessions" : "Collapse review sessions"}
-                    >
-                      {sessionsCollapsed ? (
-                        <svg viewBox="0 0 20 20" aria-hidden="true">
-                          <path
-                            d="M7 4l6 6-6 6"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                          />
-                        </svg>
-                      ) : (
-                        <svg viewBox="0 0 20 20" aria-hidden="true">
-                          <path
-                            d="M4 7l6 6 6-6"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                          />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
+          <main className="app__content">
+            <section className="review">
+              {!detail && (
+                <div className="card">
+                  Open the Yotei link from the PR comment to load this review session.
                 </div>
-                {!sessionsCollapsed && (
-                  <>
-                    <div className="pagination">
-                  <div className="pager">
-                    <button className="button ghost" onClick={handlePrev} disabled={offset === 0}>
-                      Prev
-                    </button>
-                    <button className="button ghost" onClick={handleNext} disabled={loading}>
-                      Next
-                    </button>
-                  </div>
-                </div>
-                {snapshots.length === 0 && <p>No review sessions found.</p>}
-                <ul className="list">
-                  {snapshots.map((snapshot) => (
-                    <li key={snapshot.id}>
-                      <button
-                        className={`list__item ${
-                          snapshot.id === selectedId ? "list__item--active" : ""
-                        }`}
-                        onClick={() => setSelectedId(snapshot.id)}
-                      >
-                        <div className="list__title">
-                          {snapshot.owner}/{snapshot.name} · PR #{snapshot.prNumber}
-                        </div>
-                        <div className="list__meta">
-                          {snapshot.title ?? "Untitled"} · {snapshot.headSha}
-                        </div>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </section>
-        </aside>
-        <section className="review">
-          {!detail && <div className="card">Select a review session to view details.</div>}
-          {detail && (
-            <>
+              )}
+              {detail && (
+                <>
               <div className="card review__header">
                 <div>
                   <div className="detail__meta">

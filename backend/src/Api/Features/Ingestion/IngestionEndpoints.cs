@@ -224,7 +224,11 @@ public static class IngestionEndpoints
 
         if (ShouldPostPullRequestComment(action, result.Created))
         {
-            var commentBody = BuildYoteiPullRequestCommentBody(frontendOptions.Value, tenant, prNumber);
+            var commentBody = BuildYoteiPullRequestCommentBody(
+                frontendOptions.Value,
+                tenant,
+                prNumber,
+                result.SnapshotId.Value);
             if (commentBody is null)
             {
                 logger.LogWarning(
@@ -281,7 +285,8 @@ public static class IngestionEndpoints
     private static string? BuildYoteiPullRequestCommentBody(
         FrontendSettings frontendSettings,
         Tenant tenant,
-        int prNumber)
+        int prNumber,
+        Guid snapshotId)
     {
         if (tenant is null)
         {
@@ -298,6 +303,11 @@ public static class IngestionEndpoints
             return null;
         }
 
+        if (snapshotId == Guid.Empty)
+        {
+            return null;
+        }
+
         if (!Uri.TryCreate(frontendSettings.BaseUrl, UriKind.Absolute, out var baseUri))
         {
             return null;
@@ -307,7 +317,8 @@ public static class IngestionEndpoints
         var dashboardUrl = QueryHelpers.AddQueryString(baseUrl, new Dictionary<string, string?>
         {
             ["tenant"] = tenant.Token,
-            ["view"] = "dashboard"
+            ["view"] = "dashboard",
+            ["session"] = snapshotId.ToString()
         });
         var logoUrl = new Uri(baseUri, "yotei-logo.png").ToString();
 
