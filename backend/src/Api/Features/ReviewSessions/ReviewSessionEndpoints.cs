@@ -102,10 +102,8 @@ public static class ReviewSessionEndpoints
             YoteiDbContext db,
             IRawDiffStorage storage,
             ReviewTreeBuilder builder,
-            ReviewSummaryOverviewGenerator summaryOverviewGenerator,
+            ReviewSessionLlmGenerator sessionLlmGenerator,
             IReviewExplanationGenerator explanationGenerator,
-            ReviewBehaviourSummaryGenerator behaviourSummaryGenerator,
-            ReviewNodeQuestionsGenerator questionsGenerator,
             ReviewNodeInsightsGenerator insightsGenerator,
             CancellationToken cancellationToken) =>
         {
@@ -185,7 +183,12 @@ public static class ReviewSessionEndpoints
             var buildResult = await builder.BuildAsync(session, snapshot, storage, cancellationToken);
             session.Summary = buildResult.Summary;
 
-            var overview = await summaryOverviewGenerator.GenerateAsync(snapshot, buildResult.Summary, cancellationToken);
+            var llmResult = await sessionLlmGenerator.GenerateAsync(
+                snapshot,
+                buildResult.Summary,
+                buildResult.Nodes,
+                cancellationToken);
+            var overview = llmResult.Summary ?? ReviewSummaryFallbackBuilder.Build(snapshot, buildResult.Summary);
             buildResult.Summary.OverallSummary = overview.OverallSummary;
             buildResult.Summary.BeforeState = overview.BeforeState;
             buildResult.Summary.AfterState = overview.AfterState;
@@ -210,9 +213,13 @@ public static class ReviewSessionEndpoints
 
                     if (change is not null)
                     {
-                        var summary = await behaviourSummaryGenerator.GenerateAsync(node, change, cancellationToken);
                         var checklist = insightsGenerator.BuildChecklist(node);
-                        var questions = await questionsGenerator.GenerateAsync(node, change, cancellationToken);
+                        var summary = llmResult.BehaviourSummaries.TryGetValue(node.Id, out var llmSummary)
+                            ? llmSummary
+                            : insightsGenerator.BuildBehaviourSummary(node, change);
+                        var questions = llmResult.Questions.TryGetValue(node.Id, out var llmQuestions)
+                            ? llmQuestions
+                            : BuildFallbackQuestions(node, checklist);
                         summariesToStore.Add(summary);
                         checklistsToStore.Add(checklist);
                         questionsToStore.Add(questions);
@@ -956,5 +963,16 @@ public static class ReviewSessionEndpoints
                 item.Answer,
                 item.CreatedAt))
             .ToList();
+    }
+
+    // Builds heuristic questions from a checklist when LLM output is missing.
+    private static ReviewNodeQuestions BuildFallbackQuestions(ReviewNode node, ReviewNodeChecklist checklist)
+    {
+        return new ReviewNodeQuestions
+        {
+            ReviewNodeId = node.Id,
+            Items = checklist.Items,
+            Source = "heuristic"
+        };
     }
 }

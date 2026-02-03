@@ -56,7 +56,7 @@ public sealed class ReviewSummaryOverviewGenerator
     {
         if (!IsOpenAiConfigured())
         {
-            return BuildFallbackSummary(snapshot, summary);
+            return ReviewSummaryFallbackBuilder.Build(snapshot, summary);
         }
 
         var repoSlug = snapshot.Repository is null
@@ -84,7 +84,7 @@ public sealed class ReviewSummaryOverviewGenerator
             _logger.LogWarning(
                 "OpenAI summary fallback used for review session {SessionId}.",
                 summary.ReviewSessionId);
-            return BuildFallbackSummary(snapshot, summary);
+            return ReviewSummaryFallbackBuilder.Build(snapshot, summary);
         }
 
         return new ReviewSummaryOverview(
@@ -152,46 +152,6 @@ public sealed class ReviewSummaryOverviewGenerator
         }
 
         return diff[..MaxDiffCharacters];
-    }
-
-    /// <summary>
-    /// Builds a deterministic fallback summary when OpenAI is unavailable.
-    /// </summary>
-    private static ReviewSummaryOverview BuildFallbackSummary(
-        PullRequestSnapshot snapshot,
-        ReviewSummary summary)
-    {
-        var entryPoints = summary.EntryPoints.Count > 0
-            ? string.Join(", ", summary.EntryPoints)
-            : "primary entry points";
-        var topPaths = summary.TopPaths.Count > 0
-            ? string.Join(", ", summary.TopPaths)
-            : "key paths";
-        var sideEffects = summary.SideEffects.Count > 0
-            ? string.Join(", ", summary.SideEffects)
-            : "no notable side effects";
-        var riskTags = summary.RiskTags.Count > 0
-            ? string.Join(", ", summary.RiskTags)
-            : "no elevated risk tags";
-        var testTouched = snapshot.FileChanges.Any(change =>
-            change.Path.Contains("test", StringComparison.OrdinalIgnoreCase) ||
-            change.Path.Contains("spec", StringComparison.OrdinalIgnoreCase));
-
-        var overall = $"I touched {summary.ChangedFilesCount} files, mostly around {topPaths}.";
-        var before = $"Before this, {entryPoints} handled the flow with {sideEffects}.";
-        var after = $"Now those paths are updated, and we’re calling out {riskTags}.";
-
-        if (testTouched)
-        {
-            after += " I also added/updated tests to cover the change.";
-        }
-
-        if (!string.IsNullOrWhiteSpace(snapshot.Title))
-        {
-            overall = $"{snapshot.Title.Trim()} — I updated {summary.ChangedFilesCount} files across {topPaths}.";
-        }
-
-        return new ReviewSummaryOverview(overall, before, after);
     }
 
     /// <summary>

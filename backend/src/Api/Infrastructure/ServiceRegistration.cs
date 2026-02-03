@@ -45,6 +45,8 @@ public static class ServiceRegistration
         services.Configure<FrontendSettings>(configuration.GetSection("Frontend"));
         services.Configure<TenancySettings>(configuration.GetSection("Tenancy"));
         services.Configure<OpenAiSettings>(configuration.GetSection("OpenAI"));
+        services.Configure<OpenAiPromptTemplates>(configuration.GetSection("OpenAI:Prompts"));
+        services.Configure<OpenAiReviewLimitsOptions>(configuration.GetSection("OpenAI:Limits"));
         services.Configure<FlowInferenceOptions>(configuration.GetSection("FlowInference"));
         services.AddScoped<TenantContext>();
         services.AddScoped<TenantResolverMiddleware>();
@@ -77,6 +79,7 @@ public static class ServiceRegistration
         services.AddSingleton<ReviewNodeInsightsGenerator>();
         services.AddScoped<ReviewBehaviourSummaryGenerator>();
         services.AddScoped<ReviewNodeQuestionsGenerator>();
+        services.AddScoped<ReviewSessionLlmGenerator>();
         services.AddScoped<ReviewVoiceQueryGenerator>();
         services.AddScoped<FlowGraphBuilder>();
         services.AddSingleton<IFlowInferenceAdapter, CSharpFlowInferenceAdapter>();

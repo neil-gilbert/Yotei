@@ -122,6 +122,14 @@ public class BehaviourSummaryGeneratorTests
         {
             return Task.FromResult<OpenAiReviewSummary?>(null);
         }
+
+        // Returns no combined review session response for this stub.
+        public Task<OpenAiReviewSessionResponse?> GenerateReviewSessionAsync(
+            OpenAiReviewSessionPrompt prompt,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<OpenAiReviewSessionResponse?>(null);
+        }
     }
 
     private sealed class StubRawDiffStorage : IRawDiffStorage

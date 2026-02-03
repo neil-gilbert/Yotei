@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -96,6 +97,56 @@ public sealed record OpenAiReviewSummaryFile(
     string Diff);
 
 /// <summary>
+/// Input payload for a combined review session prompt sent to OpenAI.
+/// </summary>
+/// <param name="Repository">Repository slug in owner/name format.</param>
+/// <param name="PrNumber">Pull request number.</param>
+/// <param name="Title">Pull request title.</param>
+/// <param name="ChangedFilesCount">Total changed file count.</param>
+/// <param name="NewFilesCount">New files count.</param>
+/// <param name="ModifiedFilesCount">Modified files count.</param>
+/// <param name="DeletedFilesCount">Deleted files count.</param>
+/// <param name="EntryPoints">Entry point paths.</param>
+/// <param name="SideEffects">Side-effect tags.</param>
+/// <param name="RiskTags">Risk tags.</param>
+/// <param name="TopPaths">Top changed paths.</param>
+/// <param name="Files">File-level diffs to summarize.</param>
+public sealed record OpenAiReviewSessionPrompt(
+    string Repository,
+    int PrNumber,
+    string? Title,
+    int ChangedFilesCount,
+    int NewFilesCount,
+    int ModifiedFilesCount,
+    int DeletedFilesCount,
+    IReadOnlyList<string> EntryPoints,
+    IReadOnlyList<string> SideEffects,
+    IReadOnlyList<string> RiskTags,
+    IReadOnlyList<string> TopPaths,
+    IReadOnlyList<OpenAiReviewSessionFile> Files);
+
+/// <summary>
+/// Represents a file summary input for a combined review session prompt.
+/// </summary>
+/// <param name="NodeId">The review node identifier.</param>
+/// <param name="Path">File path.</param>
+/// <param name="ChangeType">Change type label.</param>
+/// <param name="AddedLines">Added lines count.</param>
+/// <param name="DeletedLines">Deleted lines count.</param>
+/// <param name="RiskTags">Risk tags for this file node.</param>
+/// <param name="Evidence">Evidence tokens for this file node.</param>
+/// <param name="Diff">Raw diff excerpt.</param>
+public sealed record OpenAiReviewSessionFile(
+    Guid NodeId,
+    string Path,
+    string ChangeType,
+    int AddedLines,
+    int DeletedLines,
+    IReadOnlyList<string> RiskTags,
+    IReadOnlyList<string> Evidence,
+    string Diff);
+
+/// <summary>
 /// Structured OpenAI response for a behavior summary.
 /// </summary>
 /// <param name="BehaviourChange">Summary of behavioral change.</param>
@@ -123,6 +174,32 @@ public sealed record OpenAiReviewSummary(
     [property: JsonPropertyName("overallSummary")] string OverallSummary,
     [property: JsonPropertyName("beforeState")] string BeforeState,
     [property: JsonPropertyName("afterState")] string AfterState);
+
+/// <summary>
+/// Structured OpenAI response for a combined review session summary.
+/// </summary>
+/// <param name="Summary">Session-level summary payload.</param>
+/// <param name="Files">Per-file review outputs.</param>
+public sealed record OpenAiReviewSessionResponse(
+    [property: JsonPropertyName("summary")] OpenAiReviewSummary Summary,
+    [property: JsonPropertyName("files")] IReadOnlyList<OpenAiReviewSessionFileOutput> Files);
+
+/// <summary>
+/// Structured OpenAI response for a single file output in a combined review session.
+/// </summary>
+/// <param name="NodeId">The review node identifier.</param>
+/// <param name="Path">File path.</param>
+/// <param name="BehaviourChange">Summary of behavioral change.</param>
+/// <param name="Scope">Scope and confidence of the change.</param>
+/// <param name="ReviewerFocus">Reviewer focus guidance.</param>
+/// <param name="Questions">Targeted reviewer questions.</param>
+public sealed record OpenAiReviewSessionFileOutput(
+    [property: JsonPropertyName("nodeId")] string NodeId,
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("behaviourChange")] string BehaviourChange,
+    [property: JsonPropertyName("scope")] string Scope,
+    [property: JsonPropertyName("reviewerFocus")] string ReviewerFocus,
+    [property: JsonPropertyName("questions")] IReadOnlyList<string> Questions);
 
 /// <summary>
 /// Minimal OpenAI client abstraction for structured behavior summaries.
@@ -158,6 +235,16 @@ public interface IOpenAiClient
     Task<OpenAiReviewSummary?> GenerateReviewSummaryAsync(
         OpenAiReviewSummaryPrompt prompt,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Calls OpenAI chat completions to generate a combined review session JSON payload.
+    /// </summary>
+    /// <param name="prompt">The prompt payload describing the review session.</param>
+    /// <param name="cancellationToken">Cancellation token for async operations.</param>
+    /// <returns>The parsed combined review session response or null on failure.</returns>
+    Task<OpenAiReviewSessionResponse?> GenerateReviewSessionAsync(
+        OpenAiReviewSessionPrompt prompt,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -171,31 +258,41 @@ public sealed class OpenAiClient : IOpenAiClient
         PropertyNameCaseInsensitive = true
     };
 
-    private static readonly OpenAiResponseFormat BehaviourSummaryFormat = BuildBehaviourSummaryFormat();
-    private static readonly OpenAiResponseFormat ReviewerQuestionsFormat = BuildReviewerQuestionsFormat();
-    private static readonly OpenAiResponseFormat ReviewSummaryFormat = BuildReviewSummaryFormat();
     private readonly HttpClient _httpClient;
+    private readonly OpenAiPromptTemplates _promptTemplates;
     private readonly OpenAiSettings _settings;
     private readonly ILogger<OpenAiClient> _logger;
+    private readonly OpenAiResponseFormat _behaviourSummaryFormat;
+    private readonly OpenAiResponseFormat _reviewerQuestionsFormat;
+    private readonly OpenAiResponseFormat _reviewSummaryFormat;
+    private readonly OpenAiResponseFormat _reviewSessionFormat;
 
     /// <summary>
     /// Creates an OpenAI client wrapper with injected HTTP and configuration dependencies.
     /// </summary>
     /// <param name="httpClient">The HttpClient used to call OpenAI.</param>
     /// <param name="settings">The OpenAI configuration settings.</param>
+    /// <param name="promptTemplates">The prompt templates and schema descriptions.</param>
     /// <param name="logger">Logger for diagnostics and retries.</param>
     public OpenAiClient(
         HttpClient httpClient,
         IOptions<OpenAiSettings> settings,
+        IOptions<OpenAiPromptTemplates> promptTemplates,
         ILogger<OpenAiClient> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(promptTemplates);
         ArgumentNullException.ThrowIfNull(logger);
 
         _httpClient = httpClient;
         _settings = settings.Value;
+        _promptTemplates = promptTemplates.Value;
         _logger = logger;
+        _behaviourSummaryFormat = BuildBehaviourSummaryFormat(_promptTemplates.Schemas);
+        _reviewerQuestionsFormat = BuildReviewerQuestionsFormat(_promptTemplates.Schemas);
+        _reviewSummaryFormat = BuildReviewSummaryFormat(_promptTemplates.Schemas);
+        _reviewSessionFormat = BuildReviewSessionFormat(_promptTemplates.Schemas);
     }
 
     /// <summary>
@@ -273,11 +370,35 @@ public sealed class OpenAiClient : IOpenAiClient
         return result;
     }
 
+    /// <summary>
+    /// Calls OpenAI for a combined review session output with retry and timeout handling.
+    /// </summary>
+    /// <param name="prompt">Prompt data including summary stats and file-level diffs.</param>
+    /// <param name="cancellationToken">Cancellation token for async operations.</param>
+    /// <returns>The structured review session response, or null when generation fails.</returns>
+    public async Task<OpenAiReviewSessionResponse?> GenerateReviewSessionAsync(
+        OpenAiReviewSessionPrompt prompt,
+        CancellationToken cancellationToken)
+    {
+        if (!IsConfigured())
+        {
+            return null;
+        }
+
+        var requestPayload = BuildReviewSessionRequest(prompt);
+        var requestJson = JsonSerializer.Serialize(requestPayload, JsonOptions);
+
+        var result = await SendWithRetriesAsync(
+            requestJson,
+            TryParseReviewSession,
+            cancellationToken);
+        return result;
+    }
+
     // Builds the request payload for the OpenAI chat completions endpoint for summaries.
     private OpenAiChatCompletionRequest BuildSummaryRequest(OpenAiBehaviourSummaryPrompt prompt)
     {
-        var systemPrompt = "You are a code review assistant. Return JSON only using the provided schema. " +
-                           "Keep responses concise and specific to the diff.";
+        var systemPrompt = _promptTemplates.BehaviourSummarySystemPrompt;
         var userPrompt = BuildPromptBody(
             prompt.FilePath,
             prompt.ChangeType,
@@ -291,15 +412,14 @@ public sealed class OpenAiClient : IOpenAiClient
                 new OpenAiChatMessage("system", systemPrompt),
                 new OpenAiChatMessage("user", userPrompt)
             ],
-            BehaviourSummaryFormat,
+            _behaviourSummaryFormat,
             _settings.Temperature);
     }
 
     // Builds the request payload for the OpenAI chat completions endpoint for questions.
     private OpenAiChatCompletionRequest BuildQuestionsRequest(OpenAiReviewerQuestionsPrompt prompt)
     {
-        var systemPrompt = "You are a code review assistant. Return JSON only using the provided schema. " +
-                           "Generate 4-6 targeted reviewer questions that are not generic checklist items.";
+        var systemPrompt = _promptTemplates.ReviewerQuestionsSystemPrompt;
         var userPrompt = BuildPromptBody(
             prompt.FilePath,
             prompt.ChangeType,
@@ -313,18 +433,14 @@ public sealed class OpenAiClient : IOpenAiClient
                 new OpenAiChatMessage("system", systemPrompt),
                 new OpenAiChatMessage("user", userPrompt)
             ],
-            ReviewerQuestionsFormat,
+            _reviewerQuestionsFormat,
             _settings.Temperature);
     }
 
     // Builds the request payload for the OpenAI chat completions endpoint for review summaries.
     private OpenAiChatCompletionRequest BuildReviewSummaryRequest(OpenAiReviewSummaryPrompt prompt)
     {
-        var systemPrompt = "You are a senior developer explaining a change to another developer. " +
-                           "Return JSON only using the provided schema. " +
-                           "Write conversational sentences (no bullets, no file lists). " +
-                           "Explain how it worked before, what changed now, and why it matters. " +
-                           "Mention test updates if any are present.";
+        var systemPrompt = _promptTemplates.ReviewSummarySystemPrompt;
         var userPrompt = BuildReviewSummaryPromptBody(prompt);
 
         return new OpenAiChatCompletionRequest(
@@ -333,12 +449,28 @@ public sealed class OpenAiClient : IOpenAiClient
                 new OpenAiChatMessage("system", systemPrompt),
                 new OpenAiChatMessage("user", userPrompt)
             ],
-            ReviewSummaryFormat,
+            _reviewSummaryFormat,
+            _settings.Temperature);
+    }
+
+    // Builds the request payload for the OpenAI chat completions endpoint for combined review sessions.
+    private OpenAiChatCompletionRequest BuildReviewSessionRequest(OpenAiReviewSessionPrompt prompt)
+    {
+        var systemPrompt = _promptTemplates.ReviewSessionSystemPrompt;
+        var userPrompt = BuildReviewSessionPromptBody(prompt);
+
+        return new OpenAiChatCompletionRequest(
+            _settings.Model,
+            [
+                new OpenAiChatMessage("system", systemPrompt),
+                new OpenAiChatMessage("user", userPrompt)
+            ],
+            _reviewSessionFormat,
             _settings.Temperature);
     }
 
     // Builds the prompt body including file path, diff, and risk evidence.
-    private static string BuildPromptBody(
+    private string BuildPromptBody(
         string filePath,
         string changeType,
         string diff,
@@ -347,47 +479,38 @@ public sealed class OpenAiClient : IOpenAiClient
     {
         var riskText = riskTags.Count > 0
             ? string.Join(", ", riskTags)
-            : "none";
+            : _promptTemplates.NoneValue;
         var evidenceText = evidence.Count > 0
             ? string.Join(", ", evidence)
-            : "none";
+            : _promptTemplates.NoneValue;
 
-        return $"""
-File path: {filePath}
-Change type: {changeType}
-Risk tags: {riskText}
-Evidence: {evidenceText}
-Diff:
-{diff}
-""";
+        var tokens = new Dictionary<string, string>
+        {
+            ["FilePath"] = filePath,
+            ["ChangeType"] = changeType,
+            ["RiskTags"] = riskText,
+            ["Evidence"] = evidenceText,
+            ["Diff"] = diff
+        };
+
+        return ApplyTemplate(_promptTemplates.FilePromptTemplate, tokens);
     }
 
     // Builds the prompt body for review summary generation.
-    private static string BuildReviewSummaryPromptBody(OpenAiReviewSummaryPrompt prompt)
+    private string BuildReviewSummaryPromptBody(OpenAiReviewSummaryPrompt prompt)
     {
         var entryPointsText = prompt.EntryPoints.Count > 0
             ? string.Join(", ", prompt.EntryPoints)
-            : "none";
+            : _promptTemplates.NoneValue;
         var sideEffectsText = prompt.SideEffects.Count > 0
             ? string.Join(", ", prompt.SideEffects)
-            : "none";
+            : _promptTemplates.NoneValue;
         var riskText = prompt.RiskTags.Count > 0
             ? string.Join(", ", prompt.RiskTags)
-            : "none";
+            : _promptTemplates.NoneValue;
         var topPathsText = prompt.TopPaths.Count > 0
             ? string.Join(", ", prompt.TopPaths)
-            : "none";
-
-        var builder = new StringBuilder();
-        builder.AppendLine($"Repository: {prompt.Repository}");
-        builder.AppendLine($"PR: #{prompt.PrNumber}");
-        builder.AppendLine($"Title: {prompt.Title ?? "Untitled"}");
-        builder.AppendLine(
-            $"Files changed: {prompt.ChangedFilesCount} (new {prompt.NewFilesCount}, modified {prompt.ModifiedFilesCount}, deleted {prompt.DeletedFilesCount})");
-        builder.AppendLine($"Entry points: {entryPointsText}");
-        builder.AppendLine($"Side effects: {sideEffectsText}");
-        builder.AppendLine($"Risk tags: {riskText}");
-        builder.AppendLine($"Top paths: {topPathsText}");
+            : _promptTemplates.NoneValue;
 
         var testFiles = prompt.Files
             .Select(file => file.Path)
@@ -395,20 +518,145 @@ Diff:
                 path.Contains("spec", StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        builder.AppendLine(testFiles.Count > 0
-            ? $"Test files: {string.Join(", ", testFiles)}"
-            : "Test files: none");
-        builder.AppendLine("Diff excerpts:");
+        var testFilesText = testFiles.Count > 0
+            ? string.Join(", ", testFiles)
+            : _promptTemplates.NoneValue;
+
+        var titleText = string.IsNullOrWhiteSpace(prompt.Title)
+            ? _promptTemplates.UntitledValue
+            : prompt.Title;
+
+        var headerTokens = new Dictionary<string, string>
+        {
+            ["Repository"] = prompt.Repository,
+            ["PrNumber"] = prompt.PrNumber.ToString(CultureInfo.InvariantCulture),
+            ["Title"] = titleText,
+            ["ChangedFilesCount"] = prompt.ChangedFilesCount.ToString(CultureInfo.InvariantCulture),
+            ["NewFilesCount"] = prompt.NewFilesCount.ToString(CultureInfo.InvariantCulture),
+            ["ModifiedFilesCount"] = prompt.ModifiedFilesCount.ToString(CultureInfo.InvariantCulture),
+            ["DeletedFilesCount"] = prompt.DeletedFilesCount.ToString(CultureInfo.InvariantCulture),
+            ["EntryPoints"] = entryPointsText,
+            ["SideEffects"] = sideEffectsText,
+            ["RiskTags"] = riskText,
+            ["TopPaths"] = topPathsText,
+            ["TestFiles"] = testFilesText
+        };
+
+        var builder = new StringBuilder();
+        builder.Append(ApplyTemplate(_promptTemplates.ReviewSummaryHeaderTemplate, headerTokens));
 
         foreach (var file in prompt.Files)
         {
-            builder.AppendLine($"File: {file.Path} ({file.ChangeType}, +{file.AddedLines}/-{file.DeletedLines})");
-            builder.AppendLine("Diff:");
+            var fileTokens = new Dictionary<string, string>
+            {
+                ["Path"] = file.Path,
+                ["ChangeType"] = file.ChangeType,
+                ["AddedLines"] = file.AddedLines.ToString(CultureInfo.InvariantCulture),
+                ["DeletedLines"] = file.DeletedLines.ToString(CultureInfo.InvariantCulture)
+            };
+            builder.AppendLine(ApplyTemplate(_promptTemplates.ReviewSummaryFileTemplate, fileTokens));
+            builder.AppendLine(_promptTemplates.ReviewSummaryDiffLabel);
             builder.AppendLine(file.Diff);
-            builder.AppendLine("---");
+            builder.AppendLine(_promptTemplates.ReviewSummarySeparator);
         }
 
         return builder.ToString();
+    }
+
+    // Builds the prompt body for combined review session generation.
+    private string BuildReviewSessionPromptBody(OpenAiReviewSessionPrompt prompt)
+    {
+        var entryPointsText = prompt.EntryPoints.Count > 0
+            ? string.Join(", ", prompt.EntryPoints)
+            : _promptTemplates.NoneValue;
+        var sideEffectsText = prompt.SideEffects.Count > 0
+            ? string.Join(", ", prompt.SideEffects)
+            : _promptTemplates.NoneValue;
+        var riskText = prompt.RiskTags.Count > 0
+            ? string.Join(", ", prompt.RiskTags)
+            : _promptTemplates.NoneValue;
+        var topPathsText = prompt.TopPaths.Count > 0
+            ? string.Join(", ", prompt.TopPaths)
+            : _promptTemplates.NoneValue;
+
+        var titleText = string.IsNullOrWhiteSpace(prompt.Title)
+            ? _promptTemplates.UntitledValue
+            : prompt.Title;
+
+        var testFiles = prompt.Files
+            .Select(file => file.Path)
+            .Where(path => path.Contains("test", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("spec", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var testFilesText = testFiles.Count > 0
+            ? string.Join(", ", testFiles)
+            : _promptTemplates.NoneValue;
+
+        var headerTokens = new Dictionary<string, string>
+        {
+            ["Repository"] = prompt.Repository,
+            ["PrNumber"] = prompt.PrNumber.ToString(CultureInfo.InvariantCulture),
+            ["Title"] = titleText,
+            ["ChangedFilesCount"] = prompt.ChangedFilesCount.ToString(CultureInfo.InvariantCulture),
+            ["NewFilesCount"] = prompt.NewFilesCount.ToString(CultureInfo.InvariantCulture),
+            ["ModifiedFilesCount"] = prompt.ModifiedFilesCount.ToString(CultureInfo.InvariantCulture),
+            ["DeletedFilesCount"] = prompt.DeletedFilesCount.ToString(CultureInfo.InvariantCulture),
+            ["EntryPoints"] = entryPointsText,
+            ["SideEffects"] = sideEffectsText,
+            ["RiskTags"] = riskText,
+            ["TopPaths"] = topPathsText,
+            ["TestFiles"] = testFilesText
+        };
+
+        var builder = new StringBuilder();
+        builder.Append(ApplyTemplate(_promptTemplates.ReviewSessionHeaderTemplate, headerTokens));
+
+        for (var index = 0; index < prompt.Files.Count; index++)
+        {
+            var file = prompt.Files[index];
+            var riskTagsText = file.RiskTags.Count > 0
+                ? string.Join(", ", file.RiskTags)
+                : _promptTemplates.NoneValue;
+            var evidenceText = file.Evidence.Count > 0
+                ? string.Join(", ", file.Evidence)
+                : _promptTemplates.NoneValue;
+            var diffText = string.IsNullOrWhiteSpace(file.Diff)
+                ? _promptTemplates.DiffUnavailableValue
+                : file.Diff;
+
+            var fileTokens = new Dictionary<string, string>
+            {
+                ["Index"] = (index + 1).ToString(CultureInfo.InvariantCulture),
+                ["NodeId"] = file.NodeId.ToString(),
+                ["Path"] = file.Path,
+                ["ChangeType"] = file.ChangeType,
+                ["AddedLines"] = file.AddedLines.ToString(CultureInfo.InvariantCulture),
+                ["DeletedLines"] = file.DeletedLines.ToString(CultureInfo.InvariantCulture),
+                ["RiskTags"] = riskTagsText,
+                ["Evidence"] = evidenceText
+            };
+
+            builder.AppendLine(ApplyTemplate(_promptTemplates.ReviewSessionFileTemplate, fileTokens));
+            builder.AppendLine(_promptTemplates.ReviewSessionDiffLabel);
+            builder.AppendLine(diffText);
+            builder.AppendLine(_promptTemplates.ReviewSessionSeparator);
+        }
+
+        return builder.ToString();
+    }
+
+    // Applies placeholder tokens like {TokenName} in the template with provided values.
+    private static string ApplyTemplate(string template, IReadOnlyDictionary<string, string> tokens)
+    {
+        var result = template;
+        foreach (var (key, value) in tokens)
+        {
+            var token = $"{{{key}}}";
+            result = result.Replace(token, value ?? string.Empty, StringComparison.Ordinal);
+        }
+
+        return result;
     }
 
     // Sends the OpenAI request with retry and backoff for transient failures.
@@ -536,6 +784,12 @@ Diff:
         return JsonSerializer.Deserialize<OpenAiReviewSummary>(content, JsonOptions);
     }
 
+    // Parses the structured review session response.
+    private OpenAiReviewSessionResponse? TryParseReviewSession(string content)
+    {
+        return JsonSerializer.Deserialize<OpenAiReviewSessionResponse>(content, JsonOptions);
+    }
+
     // Creates a linked cancellation token source with a configured timeout.
     private CancellationTokenSource CreateTimeoutToken(CancellationToken cancellationToken)
     {
@@ -575,23 +829,25 @@ Diff:
     }
 
     // Builds the response format schema for behavior summary outputs.
-    private static OpenAiResponseFormat BuildBehaviourSummaryFormat()
+    private static OpenAiResponseFormat BuildBehaviourSummaryFormat(OpenAiSchemaTemplates schemas)
     {
+        ArgumentNullException.ThrowIfNull(schemas);
+
         var schema = new OpenAiSchema(
             "object",
-            "Behavior summary for a single file.",
+            schemas.BehaviourSummaryDescription,
             new Dictionary<string, OpenAiSchema>
             {
-                ["behaviourChange"] = OpenAiSchema.String("Concise summary of what behavior changed."),
-                ["scope"] = OpenAiSchema.String("Scope of impact and confidence."),
-                ["reviewerFocus"] = OpenAiSchema.String("Reviewer focus guidance.")
+                ["behaviourChange"] = OpenAiSchema.String(schemas.BehaviourChangeDescription),
+                ["scope"] = OpenAiSchema.String(schemas.ScopeDescription),
+                ["reviewerFocus"] = OpenAiSchema.String(schemas.ReviewerFocusDescription)
             },
             ["behaviourChange", "scope", "reviewerFocus"],
             null,
             false);
 
         var jsonSchema = new OpenAiJsonSchema(
-            "review_behaviour_summary",
+            schemas.BehaviourSummaryName,
             schema,
             true);
 
@@ -599,21 +855,25 @@ Diff:
     }
 
     // Builds the response format schema for reviewer question outputs.
-    private static OpenAiResponseFormat BuildReviewerQuestionsFormat()
+    private static OpenAiResponseFormat BuildReviewerQuestionsFormat(OpenAiSchemaTemplates schemas)
     {
+        ArgumentNullException.ThrowIfNull(schemas);
+
         var schema = new OpenAiSchema(
             "object",
-            "Reviewer questions for a single file.",
+            schemas.ReviewerQuestionsDescription,
             new Dictionary<string, OpenAiSchema>
             {
-                ["questions"] = OpenAiSchema.StringArray("Targeted reviewer questions.")
+                ["questions"] = OpenAiSchema.StringArray(
+                    schemas.ReviewerQuestionsDescriptionText,
+                    schemas.ReviewerQuestionItemDescription)
             },
             ["questions"],
             null,
             false);
 
         var jsonSchema = new OpenAiJsonSchema(
-            "review_reviewer_questions",
+            schemas.ReviewerQuestionsName,
             schema,
             true);
 
@@ -621,23 +881,75 @@ Diff:
     }
 
     // Builds the response format schema for review summary outputs.
-    private static OpenAiResponseFormat BuildReviewSummaryFormat()
+    private static OpenAiResponseFormat BuildReviewSummaryFormat(OpenAiSchemaTemplates schemas)
     {
+        ArgumentNullException.ThrowIfNull(schemas);
+
         var schema = new OpenAiSchema(
             "object",
-            "Overall summary for a review session.",
+            schemas.ReviewSummaryDescription,
             new Dictionary<string, OpenAiSchema>
             {
-                ["overallSummary"] = OpenAiSchema.String("High-level summary of the change."),
-                ["beforeState"] = OpenAiSchema.String("What the code or behavior was before the change."),
-                ["afterState"] = OpenAiSchema.String("What the change introduces or does now.")
+                ["overallSummary"] = OpenAiSchema.String(schemas.OverallSummaryDescription),
+                ["beforeState"] = OpenAiSchema.String(schemas.BeforeStateDescription),
+                ["afterState"] = OpenAiSchema.String(schemas.AfterStateDescription)
             },
             ["overallSummary", "beforeState", "afterState"],
             null,
             false);
 
         var jsonSchema = new OpenAiJsonSchema(
-            "review_summary_overview",
+            schemas.ReviewSummaryName,
+            schema,
+            true);
+
+        return new OpenAiResponseFormat("json_schema", jsonSchema);
+    }
+
+    // Builds the response format schema for combined review session outputs.
+    private static OpenAiResponseFormat BuildReviewSessionFormat(OpenAiSchemaTemplates schemas)
+    {
+        ArgumentNullException.ThrowIfNull(schemas);
+
+        var summarySchema = OpenAiSchema.Object(
+            schemas.ReviewSessionSummaryDescription,
+            new Dictionary<string, OpenAiSchema>
+            {
+                ["overallSummary"] = OpenAiSchema.String(schemas.OverallSummaryDescription),
+                ["beforeState"] = OpenAiSchema.String(schemas.BeforeStateDescription),
+                ["afterState"] = OpenAiSchema.String(schemas.AfterStateDescription)
+            },
+            ["overallSummary", "beforeState", "afterState"],
+            false);
+
+        var fileSchema = OpenAiSchema.Object(
+            schemas.ReviewSessionFileDescription,
+            new Dictionary<string, OpenAiSchema>
+            {
+                ["nodeId"] = OpenAiSchema.String(schemas.ReviewSessionFileNodeIdDescription),
+                ["path"] = OpenAiSchema.String(schemas.ReviewSessionFilePathDescription),
+                ["behaviourChange"] = OpenAiSchema.String(schemas.BehaviourChangeDescription),
+                ["scope"] = OpenAiSchema.String(schemas.ScopeDescription),
+                ["reviewerFocus"] = OpenAiSchema.String(schemas.ReviewerFocusDescription),
+                ["questions"] = OpenAiSchema.StringArray(
+                    schemas.ReviewerQuestionsDescriptionText,
+                    schemas.ReviewerQuestionItemDescription)
+            },
+            ["nodeId", "path", "behaviourChange", "scope", "reviewerFocus", "questions"],
+            false);
+
+        var schema = OpenAiSchema.Object(
+            schemas.ReviewSessionDescription,
+            new Dictionary<string, OpenAiSchema>
+            {
+                ["summary"] = summarySchema,
+                ["files"] = OpenAiSchema.Array(schemas.ReviewSessionFilesDescription, fileSchema)
+            },
+            ["summary", "files"],
+            false);
+
+        var jsonSchema = new OpenAiJsonSchema(
+            schemas.ReviewSessionName,
             schema,
             true);
 
@@ -689,11 +1001,40 @@ Diff:
         /// Builds a string array schema node.
         /// </summary>
         /// <param name="description">The description for the array field.</param>
+        /// <param name="itemDescription">The description for each array item.</param>
         /// <returns>An array schema descriptor.</returns>
-        public static OpenAiSchema StringArray(string description)
+        public static OpenAiSchema StringArray(string description, string itemDescription)
         {
-            var itemSchema = new OpenAiSchema("string", "Question text.", null, null, null, null);
+            var itemSchema = new OpenAiSchema("string", itemDescription, null, null, null, null);
             return new OpenAiSchema("array", description, null, null, itemSchema, null);
+        }
+
+        /// <summary>
+        /// Builds an object schema node with required properties.
+        /// </summary>
+        /// <param name="description">The description for the object.</param>
+        /// <param name="properties">The properties contained within the object.</param>
+        /// <param name="required">The required property names.</param>
+        /// <param name="additionalProperties">Whether extra properties are allowed.</param>
+        /// <returns>An object schema descriptor.</returns>
+        public static OpenAiSchema Object(
+            string description,
+            Dictionary<string, OpenAiSchema> properties,
+            string[] required,
+            bool? additionalProperties)
+        {
+            return new OpenAiSchema("object", description, properties, required, null, additionalProperties);
+        }
+
+        /// <summary>
+        /// Builds an array schema node with a provided item schema.
+        /// </summary>
+        /// <param name="description">The description for the array.</param>
+        /// <param name="items">The schema for each array item.</param>
+        /// <returns>An array schema descriptor.</returns>
+        public static OpenAiSchema Array(string description, OpenAiSchema items)
+        {
+            return new OpenAiSchema("array", description, null, null, items, null);
         }
     }
 

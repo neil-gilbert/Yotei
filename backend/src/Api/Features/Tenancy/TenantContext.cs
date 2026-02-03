@@ -23,6 +23,11 @@ public sealed class TenantContext
     public string TenantName { get; private set; } = string.Empty;
 
     /// <summary>
+    /// Gets the resolved tenant slug.
+    /// </summary>
+    public string TenantSlug { get; private set; } = string.Empty;
+
+    /// <summary>
     /// Gets a value indicating whether the tenant has been resolved.
     /// </summary>
     public bool IsResolved { get; private set; }
@@ -41,6 +46,7 @@ public sealed class TenantContext
         TenantId = tenant.Id;
         TenantToken = tenant.Token;
         TenantName = tenant.Name;
+        TenantSlug = tenant.Slug;
         IsResolved = true;
     }
 }
