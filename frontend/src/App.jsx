@@ -873,6 +873,9 @@ export default function App() {
   }, [detail]);
 
   useEffect(() => {
+    if (activeView !== "insights") {
+      return;
+    }
     if (insightsScope === "repo" && !selectedRepoFilter) {
       setOrgInsights(null);
       setInsightsStatus("idle");
@@ -880,7 +883,7 @@ export default function App() {
       return;
     }
     fetchOrgInsights(insightsScope === "repo" ? selectedRepoFilter : null);
-  }, [insightsScope, selectedRepoFilter]);
+  }, [activeView, insightsScope, selectedRepoFilter]);
 
   useEffect(() => {
     if (selectedId) {
@@ -1223,6 +1226,26 @@ export default function App() {
       maxVolume: Math.max(1, ...volumeItems.map((item) => item.count))
     };
   }, [orgInsights]);
+
+  const insightsSummary = useMemo(() => {
+    const sessions = orgInsights?.reviewSessionCount ?? 0;
+    const summaries = orgInsights?.reviewSummaryCount ?? 0;
+    const repoCount = orgInsights?.repositories?.length ?? 0;
+    const coverage = sessions > 0 ? Math.round((summaries / sessions) * 100) : 0;
+    const averagePerRepo = repoCount > 0 ? (sessions / repoCount).toFixed(1) : "0.0";
+    const peakDay = (insightsData.volumeItems ?? []).reduce(
+      (current, item) => (!current || item.count > current.count ? item : current),
+      null
+    );
+    return {
+      sessions,
+      summaries,
+      repoCount,
+      coverage,
+      averagePerRepo,
+      peakDay
+    };
+  }, [orgInsights, insightsData]);
 
   const activeFlowState = useMemo(() => {
     if (!selectedFlowNodeId) {
@@ -1629,6 +1652,241 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
     );
   };
 
+  const renderInsights = () => {
+    const summaryLabel =
+      insightsSummary.sessions > 0
+        ? `${insightsSummary.summaries} of ${insightsSummary.sessions} sessions summarized`
+        : "No review sessions yet.";
+    const peakDayLabel = insightsSummary.peakDay
+      ? `${new Date(insightsSummary.peakDay.date).toLocaleDateString()} · ${
+          insightsSummary.peakDay.count
+        } reviews`
+      : "No review volume yet.";
+
+    return (
+      <main className="insights-page">
+        <section className="card insights-hero">
+          <div className="insights-hero__top">
+            <div>
+              <span className="insights-hero__eyebrow">Org Insights</span>
+              <h2>Signals across review sessions.</h2>
+              <p>
+                Track where AI-generated changes are landing, which risks recur, and how review
+                volume shifts across your org.
+              </p>
+            </div>
+            <div className="insights-hero__actions">
+              <div className="insights__actions">
+                <button
+                  className={`button ghost insights__toggle ${
+                    insightsScope === "org" ? "insights__toggle--active" : ""
+                  }`}
+                  onClick={() => setInsightsScope("org")}
+                >
+                  Org
+                </button>
+                <button
+                  className={`button ghost insights__toggle ${
+                    insightsScope === "repo" ? "insights__toggle--active" : ""
+                  }`}
+                  onClick={() => setInsightsScope("repo")}
+                  disabled={!detail}
+                >
+                  Repo
+                </button>
+              </div>
+              <div className="insights-hero__meta">
+                {insightsScope === "repo" && detail && (
+                  <span className="pill">
+                    {detail.owner}/{detail.name}
+                  </span>
+                )}
+                {(orgInsights?.from || orgInsights?.to) && (
+                  <>
+                    {orgInsights?.from && (
+                      <span className="pill">
+                        From {new Date(orgInsights.from).toLocaleDateString()}
+                      </span>
+                    )}
+                    {orgInsights?.to && (
+                      <span className="pill">To {new Date(orgInsights.to).toLocaleDateString()}</span>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="insights-metrics">
+            <div className="insights-orb" style={{ "--ratio": insightsSummary.coverage }}>
+              <div className="insights-orb__ring" />
+              <div className="insights-orb__value">{insightsSummary.coverage}%</div>
+              <div className="insights-orb__label">Summary coverage</div>
+              <div className="insights-orb__sub">{summaryLabel}</div>
+            </div>
+            <div className="insights-metric">
+              <div className="summary__label">Sessions</div>
+              <div className="summary__value">{insightsSummary.sessions}</div>
+              <div className="summary__sub">{insightsSummary.summaries} summarized</div>
+            </div>
+            <div className="insights-metric">
+              <div className="summary__label">Repositories</div>
+              <div className="summary__value">{insightsSummary.repoCount}</div>
+              <div className="summary__sub">{insightsSummary.averagePerRepo} avg sessions</div>
+            </div>
+            <div className="insights-metric insights-metric--spark">
+              <div className="summary__label">Review volume</div>
+              <div className="insights-spark">
+                {insightsData.volumeDisplay.map((item) => (
+                  <span
+                    key={item.date}
+                    style={{
+                      height: `${(item.count / insightsData.maxVolume) * 100}%`
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="summary__sub">{peakDayLabel}</div>
+            </div>
+          </div>
+        </section>
+
+        {insightsError && <div className="alert">{insightsError}</div>}
+        {insightsStatus === "loading" && (
+          <section className="card insights-state">Loading insights...</section>
+        )}
+        {insightsStatus === "idle" && insightsScope === "repo" && !detail && (
+          <section className="card insights-state">
+            Select a review session on the dashboard to scope insights to a repository.
+          </section>
+        )}
+        {insightsStatus === "ready" && orgInsights && (
+          <div className="insights-grid">
+            <section className="card insights-panel">
+              <div className="insights-panel__header">
+                <div>
+                  <h3>Repository activity</h3>
+                  <p>Where review sessions are clustering right now.</p>
+                </div>
+                <span className="badge">{insightsData.repoItems.length}</span>
+              </div>
+              {insightsData.repoItems.length === 0 && (
+                <p className="summary__empty">No repository activity yet.</p>
+              )}
+              {insightsData.repoItems.length > 0 && (
+                <div className="insights-barlist">
+                  {insightsData.repoItems.slice(0, 6).map((item) => (
+                    <div key={`${item.owner}/${item.name}`} className="insights-bar">
+                      <div className="insights-bar__label">
+                        {item.owner}/{item.name}
+                      </div>
+                      <div className="insights-bar__track">
+                        <span
+                          style={{
+                            width: `${(item.reviewSessionCount / insightsData.maxRepo) * 100}%`
+                          }}
+                        />
+                      </div>
+                      <div className="insights-bar__value">{item.reviewSessionCount}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="card insights-panel">
+              <div className="insights-panel__header">
+                <div>
+                  <h3>Risk tags</h3>
+                  <p>Recurring risk signals across reviews.</p>
+                </div>
+                <span className="badge">{insightsData.riskItems.length}</span>
+              </div>
+              {insightsData.riskItems.length === 0 && (
+                <p className="summary__empty">No risk tags yet.</p>
+              )}
+              {insightsData.riskItems.length > 0 && (
+                <div className="insights-bubbles">
+                  {insightsData.riskItems.slice(0, 8).map((item) => (
+                    <div
+                      key={item.label}
+                      className="insights-bubble"
+                      style={{
+                        "--size": Math.max(0.35, item.count / insightsData.maxRisk)
+                      }}
+                    >
+                      <span>{item.label}</span>
+                      <strong>{item.count}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="card insights-panel">
+              <div className="insights-panel__header">
+                <div>
+                  <h3>Hot paths</h3>
+                  <p>Files and folders that attract the most attention.</p>
+                </div>
+                <span className="badge">{insightsData.hotItems.length}</span>
+              </div>
+              {insightsData.hotItems.length === 0 && (
+                <p className="summary__empty">No hot paths yet.</p>
+              )}
+              {insightsData.hotItems.length > 0 && (
+                <div className="insights-heat">
+                  {insightsData.hotItems.slice(0, 6).map((item) => (
+                    <div key={item.label} className="insights-heat__row">
+                      <span className="insights-heat__label">{item.label}</span>
+                      <div className="insights-heat__track">
+                        <span
+                          style={{ width: `${(item.count / insightsData.maxHot) * 100}%` }}
+                        />
+                      </div>
+                      <span className="insights-heat__value">{item.count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="card insights-panel insights-panel--wide">
+              <div className="insights-panel__header">
+                <div>
+                  <h3>Review volume</h3>
+                  <p>Daily review sessions over the last week.</p>
+                </div>
+                <span className="badge">{insightsData.volumeItems.length}</span>
+              </div>
+              {insightsData.volumeDisplay.length === 0 && (
+                <p className="summary__empty">No review volume yet.</p>
+              )}
+              {insightsData.volumeDisplay.length > 0 && (
+                <div className="insights-volume">
+                  {insightsData.volumeDisplay.map((item) => (
+                    <div key={item.date} className="insights-volume__item">
+                      <div className="insights-volume__bar">
+                        <span
+                          style={{
+                            height: `${(item.count / insightsData.maxVolume) * 100}%`
+                          }}
+                        />
+                      </div>
+                      <div className="insights-volume__label">
+                        {new Date(item.date).toLocaleDateString()}
+                      </div>
+                      <div className="insights-volume__value">{item.count}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </main>
+    );
+  };
+
   return (
     <div className="app">
       <header className="app__header">
@@ -1643,6 +1901,12 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               onClick={() => setActiveView("dashboard")}
             >
               Dashboard
+            </button>
+            <button
+              className={`button ghost ${activeView === "insights" ? "button--active" : ""}`}
+              onClick={() => setActiveView("insights")}
+            >
+              Insights
             </button>
             <button
               className={`button ghost ${activeView === "setup" ? "button--active" : ""}`}
@@ -1664,6 +1928,19 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
                 {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
               </button>
             </>
+          ) : activeView === "insights" ? (
+            <button
+              className="button ghost"
+              onClick={() =>
+                fetchOrgInsights(insightsScope === "repo" ? selectedRepoFilter : null)
+              }
+              disabled={
+                insightsStatus === "loading" ||
+                (insightsScope === "repo" && !selectedRepoFilter)
+              }
+            >
+              {insightsStatus === "loading" ? "Refreshing..." : "Refresh Insights"}
+            </button>
           ) : (
             <a className="button ghost" href={normalizedApiBase} target="_blank" rel="noreferrer">
               Open API
@@ -1673,6 +1950,8 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
       </header>
       {activeView === "setup" ? (
         renderSetup()
+      ) : activeView === "insights" ? (
+        renderInsights()
       ) : (
         <>
           {error && <div className="alert">{error}</div>}
@@ -1748,187 +2027,6 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               </>
             )}
           </section>
-          {!sessionsCollapsed && (
-            <section className="card insights">
-              <div className="card__header">
-                <h2>Org Insights</h2>
-                <div className="card__actions insights__actions">
-                  <button
-                    className={`button ghost insights__toggle ${
-                      insightsScope === "org" ? "insights__toggle--active" : ""
-                    }`}
-                    onClick={() => setInsightsScope("org")}
-                  >
-                    Org
-                  </button>
-                  <button
-                    className={`button ghost insights__toggle ${
-                      insightsScope === "repo" ? "insights__toggle--active" : ""
-                    }`}
-                    onClick={() => setInsightsScope("repo")}
-                    disabled={!detail}
-                  >
-                    Repo
-                  </button>
-                </div>
-              </div>
-              {insightsScope === "repo" && detail && (
-                <div className="insights__meta">
-                  <span className="pill">
-                    {detail.owner}/{detail.name}
-                  </span>
-                </div>
-              )}
-              {insightsError && <p className="alert">{insightsError}</p>}
-              {insightsStatus === "loading" && <p>Loading insights...</p>}
-              {insightsStatus === "idle" && insightsScope === "repo" && !detail && (
-                <p className="diff__text">Select a review session to scope insights to a repo.</p>
-              )}
-              {insightsStatus === "ready" && orgInsights && (
-                <div className="insights__body">
-                  {(orgInsights.from || orgInsights.to) && (
-                    <div className="insights__meta">
-                      {orgInsights.from && (
-                        <span className="pill">
-                          From {new Date(orgInsights.from).toLocaleDateString()}
-                        </span>
-                      )}
-                      {orgInsights.to && (
-                        <span className="pill">
-                          To {new Date(orgInsights.to).toLocaleDateString()}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <div className="insights__stats">
-                    <div className="insights__stat">
-                      <div className="summary__label">Sessions</div>
-                      <div className="summary__value">{orgInsights.reviewSessionCount}</div>
-                      <div className="summary__sub">
-                        {orgInsights.reviewSummaryCount} summaries
-                      </div>
-                    </div>
-                    <div className="insights__stat">
-                      <div className="summary__label">Repositories</div>
-                      <div className="summary__value">{orgInsights.repositories.length}</div>
-                      <div className="summary__sub">
-                        {insightsScope === "repo" ? "Filtered" : "Active"}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="insights__section">
-                    <div className="insights__section-header">
-                      <h3>Repositories</h3>
-                      <span className="badge">{insightsData.repoItems.length}</span>
-                    </div>
-                    {insightsData.repoItems.length === 0 && (
-                      <p className="diff__text">No repository activity yet.</p>
-                    )}
-                    {insightsData.repoItems.length > 0 && (
-                      <div className="insights__list">
-                        {insightsData.repoItems.slice(0, 5).map((item) => (
-                          <div key={`${item.owner}/${item.name}`} className="insights__row">
-                            <span className="insights__label">
-                              {item.owner}/{item.name}
-                            </span>
-                            <div className="insights__bar">
-                              <span
-                                style={{
-                                  width: `${(item.reviewSessionCount / insightsData.maxRepo) * 100}%`
-                                }}
-                              />
-                            </div>
-                            <span className="insights__count">{item.reviewSessionCount}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="insights__section">
-                    <div className="insights__section-header">
-                      <h3>Risk tags</h3>
-                      <span className="badge">{insightsData.riskItems.length}</span>
-                    </div>
-                    {insightsData.riskItems.length === 0 && (
-                      <p className="diff__text">No risk tags yet.</p>
-                    )}
-                    {insightsData.riskItems.length > 0 && (
-                      <div className="insights__list">
-                        {insightsData.riskItems.slice(0, 5).map((item) => (
-                          <div key={item.label} className="insights__row">
-                            <span className="insights__label">{item.label}</span>
-                            <div className="insights__bar">
-                              <span
-                                style={{
-                                  width: `${(item.count / insightsData.maxRisk) * 100}%`
-                                }}
-                              />
-                            </div>
-                            <span className="insights__count">{item.count}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="insights__section">
-                    <div className="insights__section-header">
-                      <h3>Hot paths</h3>
-                      <span className="badge">{insightsData.hotItems.length}</span>
-                    </div>
-                    {insightsData.hotItems.length === 0 && (
-                      <p className="diff__text">No hot paths yet.</p>
-                    )}
-                    {insightsData.hotItems.length > 0 && (
-                      <div className="insights__list">
-                        {insightsData.hotItems.slice(0, 5).map((item) => (
-                          <div key={item.label} className="insights__row">
-                            <span className="insights__label insights__label--mono">{item.label}</span>
-                            <div className="insights__bar">
-                              <span
-                                style={{ width: `${(item.count / insightsData.maxHot) * 100}%` }}
-                              />
-                            </div>
-                            <span className="insights__count">{item.count}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="insights__section">
-                    <div className="insights__section-header">
-                      <h3>Review volume</h3>
-                      <span className="badge">{insightsData.volumeItems.length}</span>
-                    </div>
-                    {insightsData.volumeItems.length === 0 && (
-                      <p className="diff__text">No review volume yet.</p>
-                    )}
-                    {insightsData.volumeItems.length > 0 && (
-                      <>
-                        <div className="insights__note">Last 7 days</div>
-                        <div className="insights__list">
-                          {insightsData.volumeDisplay.map((item) => (
-                            <div key={item.date} className="insights__row">
-                              <span className="insights__label insights__label--mono">
-                                {new Date(item.date).toLocaleDateString()}
-                              </span>
-                              <div className="insights__bar">
-                                <span
-                                  style={{
-                                    width: `${(item.count / insightsData.maxVolume) * 100}%`
-                                  }}
-                                />
-                              </div>
-                              <span className="insights__count">{item.count}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
         </aside>
         <section className="review">
           {!detail && <div className="card">Select a review session to view details.</div>}
