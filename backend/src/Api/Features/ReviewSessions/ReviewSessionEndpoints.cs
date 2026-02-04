@@ -565,6 +565,9 @@ public static class ReviewSessionEndpoints
 
             var node = await db.ReviewNodes
                 .AsNoTracking()
+                .Include(item => item.ReviewSession)
+                .ThenInclude(session => session.PullRequestSnapshot)
+                .ThenInclude(snapshot => snapshot!.Repository)
                 .FirstOrDefaultAsync(
                     item => item.Id == nodeId && item.ReviewSession != null &&
                         item.ReviewSession.TenantId == tenantContext.TenantId,
@@ -575,7 +578,23 @@ public static class ReviewSessionEndpoints
                 return Results.NotFound(new { error = "review node not found" });
             }
 
-            var answer = generator.GenerateAnswer(node, question);
+            var snapshot = node.ReviewSession?.PullRequestSnapshot;
+            FileChange? change = null;
+            if (snapshot is not null && !string.IsNullOrWhiteSpace(node.Path))
+            {
+                change = await db.FileChanges
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        item => item.PullRequestSnapshotId == snapshot.Id && item.Path == node.Path,
+                        cancellationToken);
+            }
+
+            var answer = await generator.GenerateAnswerAsync(
+                node,
+                question,
+                snapshot,
+                change,
+                cancellationToken);
             var transcript = new ReviewTranscript
             {
                 ReviewSessionId = node.ReviewSessionId,

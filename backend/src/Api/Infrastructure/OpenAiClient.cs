@@ -126,6 +126,33 @@ public sealed record OpenAiReviewSessionPrompt(
     IReadOnlyList<OpenAiReviewSessionFile> Files);
 
 /// <summary>
+/// Input payload for a conversational turn about a specific review node or flow.
+/// </summary>
+/// <param name="Repository">Repository slug in owner/name format.</param>
+/// <param name="PrNumber">Pull request number.</param>
+/// <param name="Title">Pull request title.</param>
+/// <param name="Mode">Interaction mode (text | voice).</param>
+/// <param name="SelectedNodeId">Selected review node identifier.</param>
+/// <param name="SelectedNodeLabel">Selected review node label or path.</param>
+/// <param name="SelectedFlowId">Selected flow graph node identifier if present.</param>
+/// <param name="NodeReviewJson">Structured node review JSON context.</param>
+/// <param name="FlowGraphJson">Structured flow graph JSON context.</param>
+/// <param name="RelevantDiffExcerpts">Diff excerpts relevant to the question.</param>
+/// <param name="ReviewerQuestion">The user's question.</param>
+public sealed record OpenAiConversationTurnPrompt(
+    string Repository,
+    int PrNumber,
+    string? Title,
+    string Mode,
+    string SelectedNodeId,
+    string SelectedNodeLabel,
+    string SelectedFlowId,
+    string NodeReviewJson,
+    string FlowGraphJson,
+    string RelevantDiffExcerpts,
+    string ReviewerQuestion);
+
+/// <summary>
 /// Represents a file summary input for a combined review session prompt.
 /// </summary>
 /// <param name="NodeId">The review node identifier.</param>
@@ -202,6 +229,21 @@ public sealed record OpenAiReviewSessionFileOutput(
     [property: JsonPropertyName("questions")] IReadOnlyList<string> Questions);
 
 /// <summary>
+/// Structured OpenAI response for a conversational turn.
+/// </summary>
+/// <param name="Answer">The short answer to the reviewer question.</param>
+/// <param name="EvidenceRefs">Evidence tokens used to justify the answer.</param>
+/// <param name="SuggestedChecklistItems">Optional checklist items derived from the conversation.</param>
+/// <param name="HighlightTargets">UI targets to highlight (diff hunks, files, or flow nodes).</param>
+/// <param name="RiskUpdates">Optional risk updates derived from the conversation.</param>
+public sealed record OpenAiConversationTurnResponse(
+    [property: JsonPropertyName("answer")] string Answer,
+    [property: JsonPropertyName("evidenceRefs")] IReadOnlyList<string>? EvidenceRefs,
+    [property: JsonPropertyName("suggestedChecklistItems")] IReadOnlyList<string>? SuggestedChecklistItems,
+    [property: JsonPropertyName("highlightTargets")] IReadOnlyList<string>? HighlightTargets,
+    [property: JsonPropertyName("riskUpdates")] IReadOnlyList<string>? RiskUpdates);
+
+/// <summary>
 /// Minimal OpenAI client abstraction for structured behavior summaries.
 /// </summary>
 public interface IOpenAiClient
@@ -245,6 +287,16 @@ public interface IOpenAiClient
     Task<OpenAiReviewSessionResponse?> GenerateReviewSessionAsync(
         OpenAiReviewSessionPrompt prompt,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Calls OpenAI chat completions to generate a short conversational answer.
+    /// </summary>
+    /// <param name="prompt">The prompt payload describing the conversation turn.</param>
+    /// <param name="cancellationToken">Cancellation token for async operations.</param>
+    /// <returns>The parsed conversational response or null on failure.</returns>
+    Task<OpenAiConversationTurnResponse?> GenerateConversationTurnAsync(
+        OpenAiConversationTurnPrompt prompt,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -266,6 +318,7 @@ public sealed class OpenAiClient : IOpenAiClient
     private readonly OpenAiResponseFormat _reviewerQuestionsFormat;
     private readonly OpenAiResponseFormat _reviewSummaryFormat;
     private readonly OpenAiResponseFormat _reviewSessionFormat;
+    private readonly OpenAiResponseFormat _conversationTurnFormat;
 
     /// <summary>
     /// Creates an OpenAI client wrapper with injected HTTP and configuration dependencies.
@@ -293,6 +346,7 @@ public sealed class OpenAiClient : IOpenAiClient
         _reviewerQuestionsFormat = BuildReviewerQuestionsFormat(_promptTemplates.Schemas);
         _reviewSummaryFormat = BuildReviewSummaryFormat(_promptTemplates.Schemas);
         _reviewSessionFormat = BuildReviewSessionFormat(_promptTemplates.Schemas);
+        _conversationTurnFormat = BuildConversationTurnFormat(_promptTemplates.Schemas);
     }
 
     /// <summary>
@@ -395,6 +449,31 @@ public sealed class OpenAiClient : IOpenAiClient
         return result;
     }
 
+    /// <summary>
+    /// Calls OpenAI for a short conversational answer with retry and timeout handling.
+    /// </summary>
+    /// <param name="prompt">Prompt data including selected node context and diff excerpts.</param>
+    /// <param name="cancellationToken">Cancellation token for async operations.</param>
+    /// <returns>The structured conversational response, or null when generation fails.</returns>
+    public async Task<OpenAiConversationTurnResponse?> GenerateConversationTurnAsync(
+        OpenAiConversationTurnPrompt prompt,
+        CancellationToken cancellationToken)
+    {
+        if (!IsConfigured())
+        {
+            return null;
+        }
+
+        var requestPayload = BuildConversationTurnRequest(prompt);
+        var requestJson = JsonSerializer.Serialize(requestPayload, JsonOptions);
+
+        var result = await SendWithRetriesAsync(
+            requestJson,
+            TryParseConversationTurn,
+            cancellationToken);
+        return result;
+    }
+
     // Builds the request payload for the OpenAI chat completions endpoint for summaries.
     private OpenAiChatCompletionRequest BuildSummaryRequest(OpenAiBehaviourSummaryPrompt prompt)
     {
@@ -466,6 +545,22 @@ public sealed class OpenAiClient : IOpenAiClient
                 new OpenAiChatMessage("user", userPrompt)
             ],
             _reviewSessionFormat,
+            _settings.Temperature);
+    }
+
+    // Builds the request payload for the OpenAI chat completions endpoint for conversation turns.
+    private OpenAiChatCompletionRequest BuildConversationTurnRequest(OpenAiConversationTurnPrompt prompt)
+    {
+        var systemPrompt = _promptTemplates.ConversationTurnSystemPrompt;
+        var userPrompt = BuildConversationTurnPromptBody(prompt);
+
+        return new OpenAiChatCompletionRequest(
+            _settings.Model,
+            [
+                new OpenAiChatMessage("system", systemPrompt),
+                new OpenAiChatMessage("user", userPrompt)
+            ],
+            _conversationTurnFormat,
             _settings.Temperature);
     }
 
@@ -646,6 +741,27 @@ public sealed class OpenAiClient : IOpenAiClient
         return builder.ToString();
     }
 
+    // Builds the prompt body for a conversational review turn.
+    private string BuildConversationTurnPromptBody(OpenAiConversationTurnPrompt prompt)
+    {
+        var tokens = new Dictionary<string, string>
+        {
+            ["Repository"] = prompt.Repository,
+            ["PrNumber"] = prompt.PrNumber.ToString(CultureInfo.InvariantCulture),
+            ["Title"] = prompt.Title ?? _promptTemplates.UntitledValue,
+            ["Mode"] = prompt.Mode,
+            ["SelectedNodeId"] = prompt.SelectedNodeId,
+            ["SelectedNodeLabel"] = prompt.SelectedNodeLabel,
+            ["SelectedFlowId"] = prompt.SelectedFlowId,
+            ["NodeReviewJson"] = prompt.NodeReviewJson,
+            ["FlowGraphJson"] = prompt.FlowGraphJson,
+            ["RelevantDiffExcerpts"] = prompt.RelevantDiffExcerpts,
+            ["ReviewerQuestion"] = prompt.ReviewerQuestion
+        };
+
+        return ApplyTemplate(_promptTemplates.ConversationTurnPromptTemplate, tokens);
+    }
+
     // Applies placeholder tokens like {TokenName} in the template with provided values.
     private static string ApplyTemplate(string template, IReadOnlyDictionary<string, string> tokens)
     {
@@ -788,6 +904,12 @@ public sealed class OpenAiClient : IOpenAiClient
     private OpenAiReviewSessionResponse? TryParseReviewSession(string content)
     {
         return JsonSerializer.Deserialize<OpenAiReviewSessionResponse>(content, JsonOptions);
+    }
+
+    // Parses the structured conversation response.
+    private OpenAiConversationTurnResponse? TryParseConversationTurn(string content)
+    {
+        return JsonSerializer.Deserialize<OpenAiConversationTurnResponse>(content, JsonOptions);
     }
 
     // Creates a linked cancellation token source with a configured timeout.
@@ -950,6 +1072,40 @@ public sealed class OpenAiClient : IOpenAiClient
 
         var jsonSchema = new OpenAiJsonSchema(
             schemas.ReviewSessionName,
+            schema,
+            true);
+
+        return new OpenAiResponseFormat("json_schema", jsonSchema);
+    }
+
+    // Builds the response format schema for conversational turn outputs.
+    private static OpenAiResponseFormat BuildConversationTurnFormat(OpenAiSchemaTemplates schemas)
+    {
+        ArgumentNullException.ThrowIfNull(schemas);
+
+        var schema = OpenAiSchema.Object(
+            schemas.ConversationTurnDescription,
+            new Dictionary<string, OpenAiSchema>
+            {
+                ["answer"] = OpenAiSchema.String(schemas.ConversationAnswerDescription),
+                ["evidenceRefs"] = OpenAiSchema.StringArray(
+                    schemas.ConversationEvidenceRefsDescription,
+                    schemas.ConversationEvidenceRefsDescription),
+                ["suggestedChecklistItems"] = OpenAiSchema.StringArray(
+                    schemas.SuggestedChecklistItemsDescription,
+                    schemas.SuggestedChecklistItemsDescription),
+                ["highlightTargets"] = OpenAiSchema.StringArray(
+                    schemas.HighlightTargetsDescription,
+                    schemas.HighlightTargetsDescription),
+                ["riskUpdates"] = OpenAiSchema.StringArray(
+                    schemas.RiskUpdatesDescription,
+                    schemas.RiskUpdatesDescription)
+            },
+            ["answer"],
+            false);
+
+        var jsonSchema = new OpenAiJsonSchema(
+            schemas.ConversationTurnName,
             schema,
             true);
 

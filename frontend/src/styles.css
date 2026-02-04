@@ -1649,6 +1649,10 @@ body {
   border-radius: 14px;
   background: rgba(13, 18, 30, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.04);
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .voice-thread__bubble--question {
