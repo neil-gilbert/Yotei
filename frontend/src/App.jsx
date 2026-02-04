@@ -59,6 +59,8 @@ export default function App() {
   const [chatStatus, setChatStatus] = useState("idle");
   const [chatError, setChatError] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatExpanded, setChatExpanded] = useState(false);
+  const [chatSoundMuted, setChatSoundMuted] = useState(false);
   const [transcriptEntries, setTranscriptEntries] = useState([]);
   const [transcriptStatus, setTranscriptStatus] = useState("idle");
   const [transcriptError, setTranscriptError] = useState("");
@@ -391,6 +393,11 @@ export default function App() {
     setTranscriptError("");
     try {
       const res = await apiFetch(`${apiBase}/review-sessions/${sessionId}/transcript`);
+      if (res.status === 404) {
+        setTranscriptEntries([]);
+        setTranscriptStatus("ready");
+        return;
+      }
       if (!res.ok) {
         throw new Error("Failed to load transcript");
       }
@@ -1946,7 +1953,11 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
       ) : (
         <>
           {error && <div className="alert">{error}</div>}
-          <main className="app__content">
+          <main
+            className={`app__content ${
+              chatOpen ? "app__content--chat-open" : ""
+            } ${chatOpen && chatExpanded ? "app__content--chat-expanded" : ""}`.trim()}
+          >
             <section className="review">
               {!detail && (
                 <div className="card">
@@ -2597,6 +2608,187 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
             </>
           )}
         </section>
+        {chatOpen && (
+          <aside className="chat-sidebar">
+            <div className="voice-mascot__panel" id="voice-mascot-panel" role="dialog">
+              <div className="voice-mascot__header">
+                <div className="voice-mascot__title">
+                  <h3 className="voice-mascot__title-label">New conversation</h3>
+                  <span className="voice-mascot__caret" aria-hidden="true">
+                    <svg viewBox="0 0 20 20" role="img">
+                      <path
+                        d="M5 7l5 6 5-6"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                      />
+                    </svg>
+                  </span>
+                </div>
+                <div className="voice-mascot__header-actions">
+                  <button
+                    className={`voice-mascot__icon-button ${
+                      chatSoundMuted ? "voice-mascot__icon-button--active" : ""
+                    }`}
+                    type="button"
+                    onClick={() => setChatSoundMuted((current) => !current)}
+                    aria-pressed={chatSoundMuted}
+                    aria-label="Toggle sound"
+                  >
+                    {chatSoundMuted ? (
+                      <svg viewBox="0 0 24 24" className="voice-mascot__icon" aria-hidden="true">
+                        <path
+                          d="M4 9h4l5-4v14l-5-4H4z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                        />
+                        <path
+                          d="M19 9l-4 4m0-4l4 4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="voice-mascot__icon" aria-hidden="true">
+                        <path
+                          d="M4 9h4l5-4v14l-5-4H4z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                        />
+                        <path
+                          d="M16 9.5a4 4 0 010 5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    className={`voice-mascot__icon-button ${
+                      chatExpanded ? "voice-mascot__icon-button--active" : ""
+                    }`}
+                    type="button"
+                    onClick={() => setChatExpanded((current) => !current)}
+                    aria-pressed={chatExpanded}
+                    aria-label="Toggle expand"
+                  >
+                    <svg viewBox="0 0 24 24" className="voice-mascot__icon" aria-hidden="true">
+                      <path
+                        d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    className="voice-mascot__icon-button"
+                    type="button"
+                    onClick={() => setChatOpen(false)}
+                    aria-label="Close chat"
+                  >
+                    <svg viewBox="0 0 20 20" className="voice-mascot__icon" aria-hidden="true">
+                      <path
+                        d="M5 5l10 10M15 5l-10 10"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="voice-mascot__context">
+                <div className="voice-mascot__focus">
+                  <span className="voice-mascot__label">Focus</span>
+                  <span className="badge">
+                    {selectedNode ? selectedNode.label : "Pick a review node"}
+                  </span>
+                </div>
+                <div className="voice-mascot__status">
+                  <span
+                    className={`voice__indicator ${
+                      chatStatus === "sending" ? "voice__indicator--active" : ""
+                    }`}
+                  />
+                  <span>{chatStatusLabel}</span>
+                </div>
+              </div>
+              <div className="voice-mascot__thread">
+                {transcriptStatus === "loading" && <p>Loading transcript...</p>}
+                {transcriptStatus === "error" && <p className="diff__error">{transcriptError}</p>}
+                {transcriptStatus === "ready" && transcriptEntries.length === 0 && (
+                  <div className="chat-empty">
+                    <img className="chat-empty__icon" src={LogoStandard} alt="Assistant" />
+                    <p className="chat-empty__title">How can I help?</p>
+                  </div>
+                )}
+                {transcriptEntries.length > 0 && (
+                  <ul className="voice-thread">
+                    {transcriptDisplay.map((entry) => (
+                      <li key={entry.id} className="voice-thread__entry">
+                        <div className="voice-thread__meta">
+                          <span className="pill">{entry.nodeLabel}</span>
+                          <span className="pill">{entry.createdAt}</span>
+                        </div>
+                        <div className="voice-thread__bubble voice-thread__bubble--question">
+                          {entry.question}
+                        </div>
+                        <div className="voice-thread__bubble voice-thread__bubble--answer">
+                          {entry.answer}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <form
+                className="voice-mascot__composer"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  sendChatMessage();
+                }}
+              >
+                <label className="field field--full">
+                  Your message
+                  <textarea
+                    value={chatDraft}
+                    onChange={(event) => setChatDraft(event.target.value)}
+                    placeholder="Ask a question…"
+                    rows={3}
+                  />
+                </label>
+                {chatError && <p className="alert">{chatError}</p>}
+                <div className="voice-mascot__actions">
+                  <button
+                    className="button"
+                    type="submit"
+                    disabled={chatStatus === "sending" || !selectedNode || !selectedId}
+                  >
+                    Send Message
+                  </button>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => setChatDraft("")}
+                    disabled={!chatDraft}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </form>
+            </div>
+          </aside>
+        )}
       </main>
       <footer className="app__footer">
         <div className="status">
@@ -2604,148 +2796,19 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
           <span className="status__value">{activeSnapshotName || "None selected"}</span>
         </div>
       </footer>
-      <div className={`voice-mascot ${chatOpen ? "voice-mascot--open" : ""}`}>
-        <div
-          className="voice-mascot__panel"
-          id="voice-mascot-panel"
-          role="dialog"
-          aria-modal="false"
-          aria-hidden={!chatOpen}
-        >
-          <div className="voice-mascot__header">
-            <div>
-              <p className="voice-mascot__eyebrow">PR Chat</p>
-              <h3>Ask about this PR</h3>
-              <p className="voice-mascot__subtext">
-                Chat is limited to the files and diffs in this pull request.
-              </p>
-            </div>
+          <div className={`voice-mascot ${chatOpen ? "voice-mascot--hidden" : ""}`}>
             <button
-              className="voice-mascot__close"
+              className="voice-mascot__button"
               type="button"
-              onClick={() => setChatOpen(false)}
-              aria-label="Close chat"
+              onClick={() => setChatOpen((current) => !current)}
+              aria-expanded={chatOpen}
+              aria-controls="voice-mascot-panel"
             >
-              X
+              <span className="voice-mascot__glow" aria-hidden="true" />
+              <img className="voice-mascot__icon" src={LogoStandard} alt="Open chat" />
             </button>
+            <div className="voice-mascot__hint">Ask about this PR</div>
           </div>
-          <div className="voice-mascot__context">
-            <div className="voice-mascot__focus">
-              <span className="voice-mascot__label">Focus</span>
-              <span className="badge">{selectedNode ? selectedNode.label : "Pick a review node"}</span>
-            </div>
-            <div className="voice-mascot__status">
-              <span
-                className={`voice__indicator ${
-                  chatStatus === "sending" ? "voice__indicator--active" : ""
-                }`}
-              />
-              <span>{chatStatusLabel}</span>
-            </div>
-          </div>
-          <p className="voice-mascot__scope">
-            Questions must stay scoped to this PR’s changes.
-          </p>
-          <div className="voice-mascot__thread">
-            <div className="voice-mascot__thread-header">
-              <div className="voice-mascot__thread-title">
-                <h4>Conversation</h4>
-                <span className="badge">{transcriptEntries.length}</span>
-              </div>
-              <div className="voice-mascot__thread-actions">
-                <button
-                  className="button ghost"
-                  onClick={() => exportTranscript("json")}
-                  disabled={!selectedId || transcriptExportStatus === "loading"}
-                >
-                  Export JSON
-                </button>
-                <button
-                  className="button ghost"
-                  onClick={() => exportTranscript("csv")}
-                  disabled={!selectedId || transcriptExportStatus === "loading"}
-                >
-                  Export CSV
-                </button>
-              </div>
-            </div>
-            {transcriptStatus === "loading" && <p>Loading transcript...</p>}
-            {transcriptStatus === "error" && <p className="diff__error">{transcriptError}</p>}
-            {transcriptStatus === "ready" && transcriptEntries.length === 0 && (
-              <p className="diff__text">No chat messages yet.</p>
-            )}
-            {transcriptEntries.length > 0 && (
-              <ul className="voice-thread">
-                {transcriptDisplay.map((entry) => (
-                  <li key={entry.id} className="voice-thread__entry">
-                    <div className="voice-thread__meta">
-                      <span className="pill">{entry.nodeLabel}</span>
-                      <span className="pill">{entry.createdAt}</span>
-                    </div>
-                    <div className="voice-thread__bubble voice-thread__bubble--question">
-                      {entry.question}
-                    </div>
-                    <div className="voice-thread__bubble voice-thread__bubble--answer">
-                      {entry.answer}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <form
-            className="voice-mascot__composer"
-            onSubmit={(event) => {
-              event.preventDefault();
-              sendChatMessage();
-            }}
-          >
-            <label className="field field--full">
-              Your message
-              <textarea
-                value={chatDraft}
-                onChange={(event) => setChatDraft(event.target.value)}
-                placeholder="Ask about specific files, risks, or checklist gaps…"
-                rows={3}
-              />
-            </label>
-            {chatError && <p className="alert">{chatError}</p>}
-            <div className="voice-mascot__actions">
-              <button
-                className="button"
-                type="submit"
-                disabled={chatStatus === "sending" || !selectedNode || !selectedId}
-              >
-                Send Message
-              </button>
-              <button
-                className="button ghost"
-                type="button"
-                onClick={() => setChatDraft("")}
-                disabled={!chatDraft}
-              >
-                Clear
-              </button>
-              <p className="voice-mascot__note">
-                {selectedNode
-                  ? "Responses stay grounded in the selected review node."
-                  : "Select a review node to ground the response."}
-              </p>
-            </div>
-          </form>
-        </div>
-        <button
-          className="voice-mascot__button"
-          type="button"
-          onClick={() => setChatOpen((current) => !current)}
-          aria-expanded={chatOpen}
-          aria-controls="voice-mascot-panel"
-        >
-          <span className="voice-mascot__glow" aria-hidden="true" />
-          <img className="voice-mascot__icon" src={LogoStandard} alt="Open chat" />
-        </button>
-        <div className="voice-mascot__hint">Ask about this PR</div>
-      </div>
         </>
       )}
     </div>
