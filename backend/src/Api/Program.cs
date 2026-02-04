@@ -1,4 +1,6 @@
 using System.Linq;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.Json;
 using Yotei.Api.Features.FileChanges;
 using Yotei.Api.Features.Health;
 using Yotei.Api.Features.Ingestion;
@@ -13,6 +15,8 @@ using Yotei.Api.Features.Tenancy;
 using Yotei.Api.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+
+DisableConfigFileReload(builder.Configuration);
 
 builder.Services.AddYoteiInfrastructure(builder.Configuration);
 builder.Services.AddCors(options =>
@@ -71,4 +75,15 @@ app.MapInsightsEndpoints();
 
 await app.RunAsync();
 
-public partial class Program { }
+// Disables file watcher reloads to avoid inotify/FD limits in constrained environments.
+static void DisableConfigFileReload(ConfigurationManager configuration)
+{
+    foreach (var source in configuration.Sources.OfType<JsonConfigurationSource>())
+    {
+        source.ReloadOnChange = false;
+    }
+}
+
+public partial class Program
+{
+}
