@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactFlow, { Background, Controls } from "reactflow";
 import "reactflow/dist/style.css";
 import LogoStandard from "./Images/Logo-Standard.png";
@@ -55,11 +55,10 @@ export default function App() {
   const [flowStatus, setFlowStatus] = useState("idle");
   const [flowError, setFlowError] = useState("");
   const [selectedFlowNodeId, setSelectedFlowNodeId] = useState(null);
-  const [voiceQuery, setVoiceQuery] = useState("");
-  const [voiceStatus, setVoiceStatus] = useState("idle");
-  const [voiceError, setVoiceError] = useState("");
-  const [recordingSupported, setRecordingSupported] = useState(false);
-  const [mascotOpen, setMascotOpen] = useState(false);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatStatus, setChatStatus] = useState("idle");
+  const [chatError, setChatError] = useState("");
+  const [chatOpen, setChatOpen] = useState(false);
   const [transcriptEntries, setTranscriptEntries] = useState([]);
   const [transcriptStatus, setTranscriptStatus] = useState("idle");
   const [transcriptError, setTranscriptError] = useState("");
@@ -82,7 +81,6 @@ export default function App() {
   const [changeTypeFilter, setChangeTypeFilter] = useState("");
   const [pathPrefixFilter, setPathPrefixFilter] = useState("");
   const [copiedLabel, setCopiedLabel] = useState("");
-  const recognitionRef = useRef(null);
   const normalizedApiBase = useMemo(() => apiBase.replace(/\/+$/, ""), [apiBase]);
   const setupMode = import.meta.env.VITE_SETUP_MODE ?? "customer";
   const installUrl = import.meta.env.VITE_GITHUB_APP_INSTALL_URL ?? "";
@@ -667,18 +665,22 @@ export default function App() {
     }
   };
 
-  const sendVoiceQuery = async () => {
+  const sendChatMessage = async () => {
+    if (!selectedId) {
+      setChatError("Select a review session before starting a chat.");
+      return;
+    }
     if (!selectedNode) {
-      setVoiceError("Select a review node before sending a voice query.");
+      setChatError("Select a review node to keep the chat scoped to PR changes.");
       return;
     }
-    const questionText = voiceQuery.trim();
+    const questionText = chatDraft.trim();
     if (!questionText) {
-      setVoiceError("Provide a question or transcript first.");
+      setChatError("Enter a question about the PR changes.");
       return;
     }
-    setVoiceStatus("sending");
-    setVoiceError("");
+    setChatStatus("sending");
+    setChatError("");
     try {
       const res = await apiFetch(`${apiBase}/review-nodes/${selectedNode.id}/voice-query`, {
         method: "POST",
@@ -686,36 +688,16 @@ export default function App() {
         body: JSON.stringify({ question: questionText })
       });
       if (!res.ok) {
-        throw new Error("Failed to send voice query");
+        throw new Error("Failed to send chat message");
       }
       await res.json();
-      setVoiceQuery("");
+      setChatDraft("");
       await addChecklistItem(selectedNode.id, questionText, "conversation");
       await fetchTranscript(selectedId);
-      setVoiceStatus("idle");
+      setChatStatus("idle");
     } catch (err) {
-      setVoiceError(err.message);
-      setVoiceStatus("error");
-    }
-  };
-
-  const startRecording = () => {
-    if (!recordingSupported || !recognitionRef.current) {
-      setVoiceError("Speech recognition is not supported in this browser.");
-      return;
-    }
-    setMascotOpen(true);
-    setVoiceError("");
-    setVoiceStatus("recording");
-    recognitionRef.current.start();
-  };
-
-  const stopRecording = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    if (voiceStatus === "recording") {
-      setVoiceStatus("idle");
+      setChatError(err.message);
+      setChatStatus("error");
     }
   };
 
@@ -844,9 +826,9 @@ export default function App() {
       setQuestionsSource("");
       setCenterTab("summary");
       setRightTab("review");
-      setVoiceQuery("");
-      setVoiceStatus("idle");
-      setVoiceError("");
+      setChatDraft("");
+      setChatStatus("idle");
+      setChatError("");
       setTranscriptEntries([]);
       setTranscriptStatus("idle");
       setTranscriptError("");
@@ -876,46 +858,6 @@ export default function App() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setRecordingSupported(false);
-      return;
-    }
-
-    setRecordingSupported(true);
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.continuous = false;
-
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .map((result) => result[0]?.transcript ?? "")
-        .join(" ")
-        .trim();
-      if (transcript) {
-        setVoiceQuery(transcript);
-      }
-      setVoiceStatus("idle");
-    };
-
-    recognition.onerror = (event) => {
-      setVoiceError(event.error ?? "Speech recognition error");
-      setVoiceStatus("error");
-    };
-
-    recognition.onend = () => {
-      setVoiceStatus("idle");
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-      recognition.stop();
-    };
-  }, []);
 
   const activeSnapshotName = useMemo(() => {
     if (!detail) return "";
@@ -957,9 +899,9 @@ export default function App() {
       setQuestionsStatus("idle");
       setQuestionsError("");
       setQuestionsSource("");
-      setVoiceQuery("");
-      setVoiceStatus("idle");
-      setVoiceError("");
+      setChatDraft("");
+      setChatStatus("idle");
+      setChatError("");
       setTranscriptEntries([]);
       setTranscriptStatus("idle");
       setTranscriptError("");
@@ -1096,27 +1038,15 @@ export default function App() {
     }));
   }, [changeTreeById, transcriptEntries]);
 
-  const transcriptPreview = useMemo(() => {
-    return transcriptDisplay.slice(-6).reverse();
-  }, [transcriptDisplay]);
-
-  const voiceStatusLabel = useMemo(() => {
-    if (voiceStatus === "recording") {
-      return "Listening…";
-    }
-    if (voiceStatus === "sending") {
+  const chatStatusLabel = useMemo(() => {
+    if (chatStatus === "sending") {
       return "Sending your question…";
     }
-    if (voiceStatus === "error") {
+    if (chatStatus === "error") {
       return "Needs attention";
     }
-    if (!recordingSupported) {
-      return "Speech recognition unavailable";
-    }
-    return "Ready to listen";
-  }, [recordingSupported, voiceStatus]);
-
-  const mascotActive = mascotOpen || voiceStatus === "recording" || voiceStatus === "sending";
+    return "Ready";
+  }, [chatStatus]);
 
   const parseDiffLines = (text) => {
     if (!text) {
@@ -2674,31 +2604,27 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
           <span className="status__value">{activeSnapshotName || "None selected"}</span>
         </div>
       </footer>
-      <div
-        className={`voice-mascot ${mascotOpen ? "voice-mascot--open" : ""} ${
-          mascotActive ? "voice-mascot--active" : ""
-        }`}
-      >
+      <div className={`voice-mascot ${chatOpen ? "voice-mascot--open" : ""}`}>
         <div
           className="voice-mascot__panel"
           id="voice-mascot-panel"
           role="dialog"
           aria-modal="false"
-          aria-hidden={!mascotOpen}
+          aria-hidden={!chatOpen}
         >
           <div className="voice-mascot__header">
             <div>
-              <p className="voice-mascot__eyebrow">PR Voice Companion</p>
+              <p className="voice-mascot__eyebrow">PR Chat</p>
               <h3>Ask about this PR</h3>
               <p className="voice-mascot__subtext">
-                Talk through diffs, risk, and checklist gaps while you review.
+                Chat is limited to the files and diffs in this pull request.
               </p>
             </div>
             <button
               className="voice-mascot__close"
               type="button"
-              onClick={() => setMascotOpen(false)}
-              aria-label="Close voice assistant"
+              onClick={() => setChatOpen(false)}
+              aria-label="Close chat"
             >
               X
             </button>
@@ -2711,63 +2637,15 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
             <div className="voice-mascot__status">
               <span
                 className={`voice__indicator ${
-                  voiceStatus === "recording" || voiceStatus === "sending"
-                    ? "voice__indicator--active"
-                    : ""
+                  chatStatus === "sending" ? "voice__indicator--active" : ""
                 }`}
               />
-              <span>{voiceStatusLabel}</span>
+              <span>{chatStatusLabel}</span>
             </div>
           </div>
-          <div className="voice-mascot__controls">
-            <button
-              className={`button voice-mascot__record ${
-                voiceStatus === "recording" ? "voice-mascot__record--active" : ""
-              }`}
-              onClick={() => {
-                if (voiceStatus === "recording") {
-                  stopRecording();
-                } else {
-                  startRecording();
-                }
-              }}
-              disabled={!recordingSupported || voiceStatus === "sending"}
-            >
-              {voiceStatus === "recording" ? "Stop Listening" : "Start Listening"}
-            </button>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={() => setVoiceQuery("")}
-              disabled={!voiceQuery}
-            >
-              Clear
-            </button>
-          </div>
-          <label className="field field--full">
-            Your question
-            <textarea
-              value={voiceQuery}
-              onChange={(event) => setVoiceQuery(event.target.value)}
-              placeholder="Ask about specific files, risk, or reviewer focus…"
-              rows={3}
-            />
-          </label>
-          {voiceError && <p className="alert">{voiceError}</p>}
-          <div className="voice-mascot__actions">
-            <button
-              className="button"
-              onClick={sendVoiceQuery}
-              disabled={voiceStatus === "sending" || !selectedNode}
-            >
-              Send Question
-            </button>
-            <p className="voice-mascot__note">
-              {selectedNode
-                ? "Responses land in the transcript and checklist."
-                : "Select a review node to ground the response."}
-            </p>
-          </div>
+          <p className="voice-mascot__scope">
+            Questions must stay scoped to this PR’s changes.
+          </p>
           <div className="voice-mascot__thread">
             <div className="voice-mascot__thread-header">
               <div className="voice-mascot__thread-title">
@@ -2794,11 +2672,11 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
             {transcriptStatus === "loading" && <p>Loading transcript...</p>}
             {transcriptStatus === "error" && <p className="diff__error">{transcriptError}</p>}
             {transcriptStatus === "ready" && transcriptEntries.length === 0 && (
-              <p className="diff__text">No transcript entries yet.</p>
+              <p className="diff__text">No chat messages yet.</p>
             )}
             {transcriptEntries.length > 0 && (
               <ul className="voice-thread">
-                {transcriptPreview.map((entry) => (
+                {transcriptDisplay.map((entry) => (
                   <li key={entry.id} className="voice-thread__entry">
                     <div className="voice-thread__meta">
                       <span className="pill">{entry.nodeLabel}</span>
@@ -2815,16 +2693,56 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               </ul>
             )}
           </div>
+          <form
+            className="voice-mascot__composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              sendChatMessage();
+            }}
+          >
+            <label className="field field--full">
+              Your message
+              <textarea
+                value={chatDraft}
+                onChange={(event) => setChatDraft(event.target.value)}
+                placeholder="Ask about specific files, risks, or checklist gaps…"
+                rows={3}
+              />
+            </label>
+            {chatError && <p className="alert">{chatError}</p>}
+            <div className="voice-mascot__actions">
+              <button
+                className="button"
+                type="submit"
+                disabled={chatStatus === "sending" || !selectedNode || !selectedId}
+              >
+                Send Message
+              </button>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => setChatDraft("")}
+                disabled={!chatDraft}
+              >
+                Clear
+              </button>
+              <p className="voice-mascot__note">
+                {selectedNode
+                  ? "Responses stay grounded in the selected review node."
+                  : "Select a review node to ground the response."}
+              </p>
+            </div>
+          </form>
         </div>
         <button
           className="voice-mascot__button"
           type="button"
-          onClick={() => setMascotOpen((current) => !current)}
-          aria-expanded={mascotOpen}
+          onClick={() => setChatOpen((current) => !current)}
+          aria-expanded={chatOpen}
           aria-controls="voice-mascot-panel"
         >
           <span className="voice-mascot__glow" aria-hidden="true" />
-          <img className="voice-mascot__icon" src={LogoStandard} alt="Voice mascot" />
+          <img className="voice-mascot__icon" src={LogoStandard} alt="Open chat" />
         </button>
         <div className="voice-mascot__hint">Ask about this PR</div>
       </div>
