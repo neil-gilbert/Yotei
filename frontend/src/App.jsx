@@ -966,6 +966,15 @@ export default function App() {
     () => dashboardLayouts.find((layout) => layout.id === dashboardLayout) ?? dashboardLayouts[0],
     [dashboardLayout]
   );
+  const dashboardTodayLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric"
+      }).format(new Date()),
+    []
+  );
 
   const selectedRepoFilter = useMemo(() => {
     if (!detail?.owner || !detail?.name) {
@@ -2073,6 +2082,10 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               <div className="dashboard-topbar__intro">
                 <h1>Dashboard</h1>
                 <p>{activeDashboardLayout.description}</p>
+                <div className="dashboard-topbar__meta">
+                  <span className="dashboard-topbar__greeting">Hello Reviewer</span>
+                  <span className="dashboard-topbar__date">{dashboardTodayLabel}</span>
+                </div>
               </div>
               <label className="dashboard-search">
                 <span>Search</span>
@@ -2080,10 +2093,11 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               </label>
               <div className="dashboard-topbar__actions">
                 <div className="dashboard-icon-strip">
-                  <button className="dashboard-icon-strip__button">AL</button>
-                  <button className="dashboard-icon-strip__button">NT</button>
-                  <button className="dashboard-icon-strip__button">MS</button>
+                  <button className="dashboard-icon-strip__button">N</button>
+                  <button className="dashboard-icon-strip__button">M</button>
+                  <button className="dashboard-icon-strip__button">U</button>
                 </div>
+                <div className="dashboard-user-chip">Admin</div>
                 <div className="view-toggle">
                   <button className="button ghost button--active">Dashboard</button>
                   <button className="button ghost" onClick={() => setActiveView("insights")}>
