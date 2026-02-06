@@ -12,33 +12,6 @@ const flowColumnX = {
   side_effect: 640,
   other: 920
 };
-const dashboardLayouts = [
-  {
-    id: "executive",
-    name: "Executive Grid",
-    description: "Balanced cards with high signal contrast."
-  },
-  {
-    id: "mint",
-    name: "Mint Ledger",
-    description: "Teal-accented operations style."
-  },
-  {
-    id: "paper",
-    name: "Paper Ops",
-    description: "Clean editorial layout with gentle surfaces."
-  },
-  {
-    id: "sunrise",
-    name: "Sunrise Panel",
-    description: "Warm metrics and bright status cues."
-  },
-  {
-    id: "night",
-    name: "Night Mission",
-    description: "Dark command center for focused reviews."
-  }
-];
 
 export default function App() {
   const [tenantToken, setTenantToken] = useState(
@@ -110,12 +83,6 @@ export default function App() {
   const [changeTypeFilter, setChangeTypeFilter] = useState("");
   const [pathPrefixFilter, setPathPrefixFilter] = useState("");
   const [copiedLabel, setCopiedLabel] = useState("");
-  const [dashboardLayout, setDashboardLayout] = useState(() => {
-    const savedLayout = localStorage.getItem("yoteiDashboardLayout");
-    return dashboardLayouts.some((layout) => layout.id === savedLayout)
-      ? savedLayout
-      : dashboardLayouts[0].id;
-  });
   const normalizedApiBase = useMemo(() => apiBase.replace(/\/+$/, ""), [apiBase]);
   const setupMode = import.meta.env.VITE_SETUP_MODE ?? "customer";
   const installUrl = import.meta.env.VITE_GITHUB_APP_INSTALL_URL ?? "";
@@ -210,14 +177,6 @@ export default function App() {
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem("yoteiDashboardLayout", dashboardLayout);
-  }, [dashboardLayout]);
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-layout", dashboardLayout);
-  }, [dashboardLayout]);
 
   useEffect(() => {
     if (!tenantToken && activeView !== "setup") {
@@ -911,48 +870,6 @@ export default function App() {
     if (!detail) return "";
     return `${detail.owner}/${detail.name} · PR #${detail.prNumber}`;
   }, [detail]);
-
-  const sessionKpis = useMemo(() => {
-    const addedLines = fileChanges.reduce((total, item) => total + (item.addedLines ?? 0), 0);
-    const removedLines = fileChanges.reduce((total, item) => total + (item.deletedLines ?? 0), 0);
-    const totalChangedLines = addedLines + removedLines;
-    const riskTagsCount = summary?.riskTags?.length ?? 0;
-    const focusLabel = selectedNode?.label ? `Focus: ${selectedNode.label}` : "No active node";
-    const completionLabel =
-      buildStatus === "ready"
-        ? "Review built"
-        : buildStatus === "loading"
-          ? "Building review"
-          : "Build pending";
-
-    return [
-      {
-        label: "Files",
-        value: fileChanges.length,
-        meta: detail ? `${detail.owner}/${detail.name}` : "No session loaded"
-      },
-      {
-        label: "Changed Lines",
-        value: totalChangedLines,
-        meta: `+${addedLines} / -${removedLines}`
-      },
-      {
-        label: "Risk Tags",
-        value: riskTagsCount,
-        meta: summaryStatus === "ready" ? "From AI summary" : "Build review to detect"
-      },
-      {
-        label: "Review Nodes",
-        value: changeTree.length,
-        meta: `${completionLabel} · ${focusLabel}`
-      }
-    ];
-  }, [buildStatus, changeTree.length, detail, fileChanges, selectedNode, summary, summaryStatus]);
-
-  const activeDashboardLayout = useMemo(
-    () => dashboardLayouts.find((layout) => layout.id === dashboardLayout) ?? dashboardLayouts[0],
-    [dashboardLayout]
-  );
 
   const selectedRepoFilter = useMemo(() => {
     if (!detail?.owner || !detail?.name) {
@@ -1965,11 +1882,11 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
   };
 
   return (
-    <div className={`app app--layout-${dashboardLayout}`}>
+    <div className="app">
       <header className="app__header">
         <div>
           <h1>Yotei</h1>
-          <p>{activeDashboardLayout.description}</p>
+          <p>Review comprehension for AI-generated changes.</p>
         </div>
         <div className="app__actions">
           <div className="view-toggle">
@@ -1991,20 +1908,6 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
             >
               Setup
             </button>
-          </div>
-          <div className="layout-switcher" role="group" aria-label="Dashboard style">
-            {dashboardLayouts.map((layout) => (
-              <button
-                key={layout.id}
-                className={`layout-switcher__chip ${
-                  dashboardLayout === layout.id ? "layout-switcher__chip--active" : ""
-                }`}
-                onClick={() => setDashboardLayout(layout.id)}
-                title={layout.description}
-              >
-                {layout.name}
-              </button>
-            ))}
           </div>
           {activeView === "dashboard" ? (
             <>
@@ -2063,67 +1966,58 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               )}
               {detail && (
                 <>
-                  <div className="dashboard-kpis">
-                    {sessionKpis.map((metric) => (
-                      <article key={metric.label} className="dashboard-kpi">
-                        <span className="dashboard-kpi__label">{metric.label}</span>
-                        <strong className="dashboard-kpi__value">{metric.value}</strong>
-                        <span className="dashboard-kpi__meta">{metric.meta}</span>
-                      </article>
-                    ))}
-                  </div>
-                  <div className="card review__header">
+              <div className="card review__header">
+                <div>
+                  <div className="detail__meta">
                     <div>
-                      <div className="detail__meta">
-                        <div>
-                          <strong>{detail.owner}</strong>/{detail.name} · PR #{detail.prNumber}
-                        </div>
-                        <div className="detail__sub">
-                          {detail.title ?? "Untitled"} · {detail.source} · {detail.defaultBranch}
-                        </div>
-                      </div>
-                      <div className="detail__meta">
-                        <div>
-                          <span className="label">Base</span> {detail.baseSha}
-                        </div>
-                        <div>
-                          <span className="label">Head</span> {detail.headSha}
-                        </div>
-                      </div>
+                      <strong>{detail.owner}</strong>/{detail.name} · PR #{detail.prNumber}
                     </div>
-                    <div className="review__header-actions">
-                      <span className="badge">{fileChanges.length} files</span>
-                      <button
-                        className="button ghost danger"
-                        onClick={handleDeleteSnapshot}
-                        disabled={loading}
-                      >
-                        Delete Session
-                      </button>
+                    <div className="detail__sub">
+                      {detail.title ?? "Untitled"} · {detail.source} · {detail.defaultBranch}
                     </div>
                   </div>
-                  <div className="review__layout">
-                    <div className="review__column review__column--center">
-                      <div className="card tabs-card">
-                        <div className="tabs">
-                          {[
-                            { id: "summary", label: "Summary" },
-                            { id: "flow", label: "Flow" },
-                            { id: "tree", label: "Tree" },
-                            { id: "files", label: "Files" },
-                            { id: "diff", label: "Focused Diff" },
-                            { id: "fullDiff", label: "Full PR Diff" }
-                          ].map((tab) => (
-                            <button
-                              key={tab.id}
-                              className={`tabs__button ${centerTab === tab.id ? "tabs__button--active" : ""}`}
-                              onClick={() => setCenterTab(tab.id)}
-                            >
-                              {tab.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                  <div className="detail__meta">
+                    <div>
+                      <span className="label">Base</span> {detail.baseSha}
+                    </div>
+                    <div>
+                      <span className="label">Head</span> {detail.headSha}
+                    </div>
+                  </div>
+                </div>
+                <div className="review__header-actions">
+                  <span className="badge">{fileChanges.length} files</span>
+                  <button
+                    className="button ghost danger"
+                    onClick={handleDeleteSnapshot}
+                    disabled={loading}
+                  >
+                    Delete Session
+                  </button>
+                </div>
+              </div>
+              <div className="review__layout">
+                <div className="review__column review__column--center">
+                  <div className="card tabs-card">
+                    <div className="tabs">
+                      {[
+                        { id: "summary", label: "Summary" },
+                        { id: "flow", label: "Flow" },
+                        { id: "tree", label: "Tree" },
+                        { id: "files", label: "Files" },
+                        { id: "diff", label: "Focused Diff" },
+                        { id: "fullDiff", label: "Full PR Diff" }
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          className={`tabs__button ${centerTab === tab.id ? "tabs__button--active" : ""}`}
+                          onClick={() => setCenterTab(tab.id)}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   {centerTab === "summary" && (
                     <div className="card">
                       <div className="summary__header">
