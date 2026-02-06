@@ -14,30 +14,43 @@ const flowColumnX = {
 };
 const dashboardLayouts = [
   {
-    id: "executive",
-    name: "Executive Grid",
-    description: "Balanced cards with high signal contrast."
+    id: "finbank",
+    name: "FinBank",
+    description: "Dark finance dashboard with compact KPI tiles."
   },
   {
-    id: "mint",
-    name: "Mint Ledger",
-    description: "Teal-accented operations style."
+    id: "wehr-classic",
+    name: "WeHR Classic",
+    description: "Clean HR dashboard with soft metric cards."
   },
   {
-    id: "paper",
-    name: "Paper Ops",
-    description: "Clean editorial layout with gentle surfaces."
+    id: "wehr-split",
+    name: "WeHR Split",
+    description: "Dual-column dashboard with activity emphasis."
   },
   {
-    id: "sunrise",
-    name: "Sunrise Panel",
-    description: "Warm metrics and bright status cues."
+    id: "health-split",
+    name: "Health Split",
+    description: "Clinical split-pane dashboard with dark right rail."
   },
   {
-    id: "night",
-    name: "Night Mission",
-    description: "Dark command center for focused reviews."
+    id: "ops-night",
+    name: "Ops Night",
+    description: "Mission-control style admin cockpit."
   }
+];
+
+const dashboardPrimaryNav = [
+  { key: "dashboard", label: "Dashboard", short: "DB" },
+  { key: "recruitment", label: "Recruitment", short: "RC" },
+  { key: "schedule", label: "Schedule", short: "SC" },
+  { key: "employees", label: "Employees", short: "EM" },
+  { key: "departments", label: "Departments", short: "DP" }
+];
+
+const dashboardSecondaryNav = [
+  { key: "support", label: "Support", short: "SP" },
+  { key: "settings", label: "Settings", short: "ST" }
 ];
 
 export default function App() {
@@ -1966,92 +1979,153 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
 
   return (
     <div className={`app app--layout-${dashboardLayout}`}>
-      <header className="app__header">
-        <div>
-          <h1>Yotei</h1>
-          <p>{activeDashboardLayout.description}</p>
-        </div>
-        <div className="app__actions">
-          <div className="view-toggle">
-            <button
-              className={`button ghost ${activeView === "dashboard" ? "button--active" : ""}`}
-              onClick={() => setActiveView("dashboard")}
-            >
-              Dashboard
-            </button>
-            <button
-              className={`button ghost ${activeView === "insights" ? "button--active" : ""}`}
-              onClick={() => setActiveView("insights")}
-            >
-              Insights
-            </button>
-            <button
-              className={`button ghost ${activeView === "setup" ? "button--active" : ""}`}
-              onClick={() => setActiveView("setup")}
-            >
-              Setup
-            </button>
+      {activeView !== "dashboard" && (
+        <header className="app__header">
+          <div>
+            <h1>Yotei</h1>
+            <p>{activeDashboardLayout.description}</p>
           </div>
-          <div className="layout-switcher" role="group" aria-label="Dashboard style">
-            {dashboardLayouts.map((layout) => (
+          <div className="app__actions">
+            <div className="view-toggle">
               <button
-                key={layout.id}
-                className={`layout-switcher__chip ${
-                  dashboardLayout === layout.id ? "layout-switcher__chip--active" : ""
-                }`}
-                onClick={() => setDashboardLayout(layout.id)}
-                title={layout.description}
+                className={`button ghost ${activeView === "dashboard" ? "button--active" : ""}`}
+                onClick={() => setActiveView("dashboard")}
               >
-                {layout.name}
+                Dashboard
               </button>
-            ))}
-          </div>
-          {activeView === "dashboard" ? (
-            <>
+              <button
+                className={`button ghost ${activeView === "insights" ? "button--active" : ""}`}
+                onClick={() => setActiveView("insights")}
+              >
+                Insights
+              </button>
+              <button
+                className={`button ghost ${activeView === "setup" ? "button--active" : ""}`}
+                onClick={() => setActiveView("setup")}
+              >
+                Setup
+              </button>
+            </div>
+            {activeView === "insights" ? (
               <button
                 className="button ghost"
-                onClick={refreshSession}
-                disabled={loading || !selectedId}
+                onClick={() =>
+                  fetchOrgInsights(insightsScope === "repo" ? selectedRepoFilter : null)
+                }
+                disabled={
+                  insightsStatus === "loading" ||
+                  (insightsScope === "repo" && !selectedRepoFilter)
+                }
               >
-                Refresh
+                {insightsStatus === "loading" ? "Refreshing..." : "Refresh Insights"}
               </button>
-              <button
-                className="button"
-                onClick={buildReview}
-                disabled={buildStatus === "loading" || !selectedId}
+            ) : (
+              <a
+                className="button ghost"
+                href={normalizedApiBase}
+                target="_blank"
+                rel="noreferrer"
               >
-                {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
-              </button>
-            </>
-          ) : activeView === "insights" ? (
-            <button
-              className="button ghost"
-              onClick={() =>
-                fetchOrgInsights(insightsScope === "repo" ? selectedRepoFilter : null)
-              }
-              disabled={
-                insightsStatus === "loading" ||
-                (insightsScope === "repo" && !selectedRepoFilter)
-              }
-            >
-              {insightsStatus === "loading" ? "Refreshing..." : "Refresh Insights"}
-            </button>
-          ) : (
-            <a className="button ghost" href={normalizedApiBase} target="_blank" rel="noreferrer">
-              Open API
-            </a>
-          )}
-        </div>
-      </header>
+                Open API
+              </a>
+            )}
+          </div>
+        </header>
+      )}
       {activeView === "setup" ? (
         renderSetup()
       ) : activeView === "insights" ? (
         renderInsights()
       ) : (
-        <>
+        <div className={`dashboard-shell dashboard-shell--${dashboardLayout}`}>
+          <aside className="dashboard-sidebar">
+            <div className="dashboard-sidebar__brand">
+              <strong>Yotei</strong>
+              <span>Admin Suite</span>
+            </div>
+            <p className="dashboard-sidebar__group-label">Main menu</p>
+            <nav className="dashboard-sidebar__nav">
+              {dashboardPrimaryNav.map((item) => (
+                <button
+                  key={item.key}
+                  className={`dashboard-nav-item ${
+                    item.key === "dashboard" ? "dashboard-nav-item--active" : ""
+                  }`}
+                >
+                  <span className="dashboard-nav-item__icon">{item.short}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </nav>
+            <p className="dashboard-sidebar__group-label">Other</p>
+            <nav className="dashboard-sidebar__nav">
+              {dashboardSecondaryNav.map((item) => (
+                <button key={item.key} className="dashboard-nav-item">
+                  <span className="dashboard-nav-item__icon">{item.short}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </nav>
+            <button className="dashboard-sidebar__logout">Logout</button>
+          </aside>
+          <div className="dashboard-stage">
+            <header className="dashboard-topbar">
+              <div className="dashboard-topbar__intro">
+                <h1>Dashboard</h1>
+                <p>{activeDashboardLayout.description}</p>
+              </div>
+              <label className="dashboard-search">
+                <span>Search</span>
+                <input placeholder="Search sessions, files, nodes" />
+              </label>
+              <div className="dashboard-topbar__actions">
+                <div className="dashboard-icon-strip">
+                  <button className="dashboard-icon-strip__button">AL</button>
+                  <button className="dashboard-icon-strip__button">NT</button>
+                  <button className="dashboard-icon-strip__button">MS</button>
+                </div>
+                <div className="view-toggle">
+                  <button className="button ghost button--active">Dashboard</button>
+                  <button className="button ghost" onClick={() => setActiveView("insights")}>
+                    Insights
+                  </button>
+                  <button className="button ghost" onClick={() => setActiveView("setup")}>
+                    Setup
+                  </button>
+                </div>
+                <div className="layout-switcher" role="group" aria-label="Dashboard style">
+                  {dashboardLayouts.map((layout) => (
+                    <button
+                      key={layout.id}
+                      className={`layout-switcher__chip ${
+                        dashboardLayout === layout.id ? "layout-switcher__chip--active" : ""
+                      }`}
+                      onClick={() => setDashboardLayout(layout.id)}
+                      title={layout.description}
+                    >
+                      {layout.name}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="button ghost"
+                  onClick={refreshSession}
+                  disabled={loading || !selectedId}
+                >
+                  Refresh
+                </button>
+                <button
+                  className="button"
+                  onClick={buildReview}
+                  disabled={buildStatus === "loading" || !selectedId}
+                >
+                  {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
+                </button>
+              </div>
+            </header>
           {error && <div className="alert">{error}</div>}
           <main
-            className={`app__content ${
+            className={`app__content dashboard-content ${
               chatOpen ? "app__content--chat-open" : ""
             } ${chatOpen && chatExpanded ? "app__content--chat-expanded" : ""}`.trim()}
           >
@@ -2915,7 +2989,8 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
             </button>
             <div className="voice-mascot__hint">Ask about this PR</div>
           </div>
-        </>
+          </div>
+        </div>
       )}
     </div>
   );
