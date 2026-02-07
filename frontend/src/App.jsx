@@ -1882,70 +1882,95 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
   };
 
   return (
-    <div className="app">
-      <header className="app__header">
-        <div>
-          <h1>Yotei</h1>
-          <p>Review comprehension for AI-generated changes.</p>
-        </div>
-        <div className="app__actions">
-          <div className="view-toggle">
-            <button
-              className={`button ghost ${activeView === "dashboard" ? "button--active" : ""}`}
-              onClick={() => setActiveView("dashboard")}
-            >
-              Dashboard
-            </button>
-            <button
-              className={`button ghost ${activeView === "insights" ? "button--active" : ""}`}
-              onClick={() => setActiveView("insights")}
-            >
-              Insights
-            </button>
-            <button
-              className={`button ghost ${activeView === "setup" ? "button--active" : ""}`}
-              onClick={() => setActiveView("setup")}
-            >
-              Setup
-            </button>
+    <div className="app admin-shell">
+      <aside className="admin-sidebar">
+        <div className="admin-sidebar__brand">
+          <img src={LogoStandard} alt="Yotei" />
+          <div>
+            <strong>Yotei</strong>
+            <span>Review Admin</span>
           </div>
-          {activeView === "dashboard" ? (
-            <>
+        </div>
+        <nav className="admin-sidebar__nav">
+          <button
+            className={`admin-nav__item ${activeView === "dashboard" ? "admin-nav__item--active" : ""}`}
+            onClick={() => setActiveView("dashboard")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5.5 3.25H9A2.25 2.25 0 0111.25 5.5V9A2.25 2.25 0 019 11.25H5.5A2.25 2.25 0 013.25 9V5.5A2.25 2.25 0 015.5 3.25Zm9.5 0h3.5a2.25 2.25 0 012.25 2.25V9a2.25 2.25 0 01-2.25 2.25H15A2.25 2.25 0 0112.75 9V5.5A2.25 2.25 0 0115 3.25ZM5.5 12.75H9A2.25 2.25 0 0111.25 15v3.5A2.25 2.25 0 019 20.75H5.5a2.25 2.25 0 01-2.25-2.25V15a2.25 2.25 0 012.25-2.25Zm9.5 0h3.5a2.25 2.25 0 012.25 2.25v3.5a2.25 2.25 0 01-2.25 2.25H15a2.25 2.25 0 01-2.25-2.25V15A2.25 2.25 0 0115 12.75Z" />
+            </svg>
+            <span>Dashboard</span>
+          </button>
+          <button
+            className={`admin-nav__item ${activeView === "insights" ? "admin-nav__item--active" : ""}`}
+            onClick={() => setActiveView("insights")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 18.5A1.5 1.5 0 015.5 17h1A1.5 1.5 0 018 18.5V20H4v-1.5Zm6-4A1.5 1.5 0 0111.5 13h1a1.5 1.5 0 011.5 1.5V20h-4v-5.5Zm6-6A1.5 1.5 0 0117.5 7h1A1.5 1.5 0 0120 8.5V20h-4V8.5ZM3.5 4.75h17a.75.75 0 000-1.5h-17a.75.75 0 000 1.5Z" />
+            </svg>
+            <span>Insights</span>
+          </button>
+          <button
+            className={`admin-nav__item ${activeView === "setup" ? "admin-nav__item--active" : ""}`}
+            onClick={() => setActiveView("setup")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10.4 2.8a2.2 2.2 0 013.2 0l.7.75a1.9 1.9 0 001.8.52l1.02-.25a2.2 2.2 0 012.56 1.92l.1 1a1.9 1.9 0 001.15 1.48l.94.42a2.2 2.2 0 011.03 3.04l-.5.88a1.9 1.9 0 000 1.88l.5.88a2.2 2.2 0 01-1.03 3.04l-.94.42a1.9 1.9 0 00-1.14 1.48l-.12 1a2.2 2.2 0 01-2.55 1.92l-1.03-.25a1.9 1.9 0 00-1.8.52l-.7.75a2.2 2.2 0 01-3.2 0l-.7-.75a1.9 1.9 0 00-1.8-.52l-1.02.25a2.2 2.2 0 01-2.56-1.92l-.1-1a1.9 1.9 0 00-1.15-1.48l-.94-.42a2.2 2.2 0 01-1.03-3.04l.5-.88a1.9 1.9 0 000-1.88l-.5-.88a2.2 2.2 0 011.03-3.04l.94-.42A1.9 1.9 0 004.8 6.74l.1-1a2.2 2.2 0 012.56-1.92l1.02.25a1.9 1.9 0 001.8-.52l.7-.75Zm1.2 5.45a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5Z" />
+            </svg>
+            <span>Setup</span>
+          </button>
+        </nav>
+        <div className="admin-sidebar__meta">
+          <span className="admin-sidebar__meta-label">Tenant</span>
+          <span className="admin-sidebar__meta-value">
+            {tenantToken ? "Connected" : "Not connected"}
+          </span>
+        </div>
+      </aside>
+      <div className="admin-main">
+        <header className="app__header">
+          <div>
+            <h1>Yotei Dashboard</h1>
+            <p>TailAdmin-style workspace for review sessions and org insights.</p>
+          </div>
+          <div className="app__actions">
+            {activeView === "dashboard" ? (
+              <>
+                <button
+                  className="button ghost"
+                  onClick={refreshSession}
+                  disabled={loading || !selectedId}
+                >
+                  Refresh
+                </button>
+                <button
+                  className="button"
+                  onClick={buildReview}
+                  disabled={buildStatus === "loading" || !selectedId}
+                >
+                  {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
+                </button>
+              </>
+            ) : activeView === "insights" ? (
               <button
                 className="button ghost"
-                onClick={refreshSession}
-                disabled={loading || !selectedId}
+                onClick={() =>
+                  fetchOrgInsights(insightsScope === "repo" ? selectedRepoFilter : null)
+                }
+                disabled={
+                  insightsStatus === "loading" ||
+                  (insightsScope === "repo" && !selectedRepoFilter)
+                }
               >
-                Refresh
+                {insightsStatus === "loading" ? "Refreshing..." : "Refresh Insights"}
               </button>
-              <button
-                className="button"
-                onClick={buildReview}
-                disabled={buildStatus === "loading" || !selectedId}
-              >
-                {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
-              </button>
-            </>
-          ) : activeView === "insights" ? (
-            <button
-              className="button ghost"
-              onClick={() =>
-                fetchOrgInsights(insightsScope === "repo" ? selectedRepoFilter : null)
-              }
-              disabled={
-                insightsStatus === "loading" ||
-                (insightsScope === "repo" && !selectedRepoFilter)
-              }
-            >
-              {insightsStatus === "loading" ? "Refreshing..." : "Refresh Insights"}
-            </button>
-          ) : (
-            <a className="button ghost" href={normalizedApiBase} target="_blank" rel="noreferrer">
-              Open API
-            </a>
-          )}
-        </div>
-      </header>
+            ) : (
+              <a className="button ghost" href={normalizedApiBase} target="_blank" rel="noreferrer">
+                Open API
+              </a>
+            )}
+          </div>
+        </header>
       {activeView === "setup" ? (
         renderSetup()
       ) : activeView === "insights" ? (
@@ -2811,6 +2836,7 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
           </div>
         </>
       )}
+      </div>
     </div>
   );
 }
