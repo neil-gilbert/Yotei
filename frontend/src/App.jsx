@@ -61,6 +61,8 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
   const [chatSoundMuted, setChatSoundMuted] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [transcriptEntries, setTranscriptEntries] = useState([]);
   const [transcriptStatus, setTranscriptStatus] = useState("idle");
   const [transcriptError, setTranscriptError] = useState("");
@@ -206,6 +208,19 @@ export default function App() {
     localStorage.removeItem("yoteiTenantToken");
     setTenantToken("");
     setActiveView("setup");
+  };
+
+  const handleSidebarToggle = () => {
+    if (window.innerWidth >= 1024) {
+      setSidebarCollapsed((current) => !current);
+      return;
+    }
+    setSidebarOpen((current) => !current);
+  };
+
+  const handleViewChange = (view) => {
+    setActiveView(view);
+    setSidebarOpen(false);
   };
 
   const refreshSession = () => {
@@ -1882,95 +1897,226 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
   };
 
   return (
-    <div className="app admin-shell">
-      <aside className="admin-sidebar">
-        <div className="admin-sidebar__brand">
-          <img src={LogoStandard} alt="Yotei" />
-          <div>
-            <strong>Yotei</strong>
-            <span>Review Admin</span>
+    <div className="app">
+      <div className="flex h-screen overflow-hidden bg-gray-50">
+        <aside
+          className={`sidebar fixed left-0 top-0 z-9999 flex h-screen w-[290px] flex-col overflow-y-hidden border-r border-gray-200 bg-white px-5 transition-all duration-300 ease-linear dark:border-gray-800 dark:bg-black lg:static lg:translate-x-0 ${
+            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          } ${sidebarCollapsed ? "lg:w-[90px]" : "lg:w-[290px]"}`}
+        >
+          <div
+            className={`sidebar-header flex items-center gap-2 pb-7 pt-8 ${
+              sidebarCollapsed ? "justify-center" : "justify-between"
+            }`}
+          >
+            <a href={normalizedApiBase} target="_blank" rel="noreferrer">
+              <span className={`logo ${sidebarCollapsed ? "hidden" : ""}`}>
+                <img className="dark:hidden" src="/images/logo/logo.svg" alt="TailAdmin Logo" />
+                <img
+                  className="hidden dark:block"
+                  src="/images/logo/logo-dark.svg"
+                  alt="TailAdmin Logo"
+                />
+              </span>
+              <img
+                className={`logo-icon ${sidebarCollapsed ? "lg:block" : "hidden"}`}
+                src="/images/logo/logo-icon.svg"
+                alt="TailAdmin Logo"
+              />
+            </a>
           </div>
-        </div>
-        <nav className="admin-sidebar__nav">
-          <button
-            className={`admin-nav__item ${activeView === "dashboard" ? "admin-nav__item--active" : ""}`}
-            onClick={() => setActiveView("dashboard")}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M5.5 3.25H9A2.25 2.25 0 0111.25 5.5V9A2.25 2.25 0 019 11.25H5.5A2.25 2.25 0 013.25 9V5.5A2.25 2.25 0 015.5 3.25Zm9.5 0h3.5a2.25 2.25 0 012.25 2.25V9a2.25 2.25 0 01-2.25 2.25H15A2.25 2.25 0 0112.75 9V5.5A2.25 2.25 0 0115 3.25ZM5.5 12.75H9A2.25 2.25 0 0111.25 15v3.5A2.25 2.25 0 019 20.75H5.5a2.25 2.25 0 01-2.25-2.25V15a2.25 2.25 0 012.25-2.25Zm9.5 0h3.5a2.25 2.25 0 012.25 2.25v3.5a2.25 2.25 0 01-2.25 2.25H15a2.25 2.25 0 01-2.25-2.25V15A2.25 2.25 0 0115 12.75Z" />
-            </svg>
-            <span>Dashboard</span>
-          </button>
-          <button
-            className={`admin-nav__item ${activeView === "insights" ? "admin-nav__item--active" : ""}`}
-            onClick={() => setActiveView("insights")}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 18.5A1.5 1.5 0 015.5 17h1A1.5 1.5 0 018 18.5V20H4v-1.5Zm6-4A1.5 1.5 0 0111.5 13h1a1.5 1.5 0 011.5 1.5V20h-4v-5.5Zm6-6A1.5 1.5 0 0117.5 7h1A1.5 1.5 0 0120 8.5V20h-4V8.5ZM3.5 4.75h17a.75.75 0 000-1.5h-17a.75.75 0 000 1.5Z" />
-            </svg>
-            <span>Insights</span>
-          </button>
-          <button
-            className={`admin-nav__item ${activeView === "setup" ? "admin-nav__item--active" : ""}`}
-            onClick={() => setActiveView("setup")}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M10.4 2.8a2.2 2.2 0 013.2 0l.7.75a1.9 1.9 0 001.8.52l1.02-.25a2.2 2.2 0 012.56 1.92l.1 1a1.9 1.9 0 001.15 1.48l.94.42a2.2 2.2 0 011.03 3.04l-.5.88a1.9 1.9 0 000 1.88l.5.88a2.2 2.2 0 01-1.03 3.04l-.94.42a1.9 1.9 0 00-1.14 1.48l-.12 1a2.2 2.2 0 01-2.55 1.92l-1.03-.25a1.9 1.9 0 00-1.8.52l-.7.75a2.2 2.2 0 01-3.2 0l-.7-.75a1.9 1.9 0 00-1.8-.52l-1.02.25a2.2 2.2 0 01-2.56-1.92l-.1-1a1.9 1.9 0 00-1.15-1.48l-.94-.42a2.2 2.2 0 01-1.03-3.04l.5-.88a1.9 1.9 0 000-1.88l-.5-.88a2.2 2.2 0 011.03-3.04l.94-.42A1.9 1.9 0 004.8 6.74l.1-1a2.2 2.2 0 012.56-1.92l1.02.25a1.9 1.9 0 001.8-.52l.7-.75Zm1.2 5.45a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5Z" />
-            </svg>
-            <span>Setup</span>
-          </button>
-        </nav>
-        <div className="admin-sidebar__meta">
-          <span className="admin-sidebar__meta-label">Tenant</span>
-          <span className="admin-sidebar__meta-value">
-            {tenantToken ? "Connected" : "Not connected"}
-          </span>
-        </div>
-      </aside>
-      <div className="admin-main">
-        <header className="app__header">
-          <div>
-            <h1>Yotei Dashboard</h1>
-            <p>TailAdmin-style workspace for review sessions and org insights.</p>
-          </div>
-          <div className="app__actions">
-            {activeView === "dashboard" ? (
-              <>
-                <button
-                  className="button ghost"
-                  onClick={refreshSession}
-                  disabled={loading || !selectedId}
-                >
-                  Refresh
-                </button>
-                <button
-                  className="button"
-                  onClick={buildReview}
-                  disabled={buildStatus === "loading" || !selectedId}
-                >
-                  {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
-                </button>
-              </>
-            ) : activeView === "insights" ? (
-              <button
-                className="button ghost"
-                onClick={() =>
-                  fetchOrgInsights(insightsScope === "repo" ? selectedRepoFilter : null)
-                }
-                disabled={
-                  insightsStatus === "loading" ||
-                  (insightsScope === "repo" && !selectedRepoFilter)
-                }
-              >
-                {insightsStatus === "loading" ? "Refreshing..." : "Refresh Insights"}
-              </button>
-            ) : (
-              <a className="button ghost" href={normalizedApiBase} target="_blank" rel="noreferrer">
-                Open API
-              </a>
+
+          <div className="no-scrollbar flex flex-col overflow-y-auto duration-300 ease-linear">
+            <nav>
+              <div>
+                <h3 className="mb-4 text-xs leading-[20px] text-gray-400 uppercase">
+                  <span className={`menu-group-title ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+                    Menu
+                  </span>
+                </h3>
+                <ul className="mb-6 flex flex-col gap-4">
+                  <li>
+                    <button
+                      className={`menu-item group ${
+                        activeView === "dashboard" ? "menu-item-active" : "menu-item-inactive"
+                      } ${sidebarCollapsed ? "lg:justify-center" : ""}`}
+                      onClick={() => handleViewChange("dashboard")}
+                    >
+                      <svg
+                        className={`menu-item-icon-size ${
+                          activeView === "dashboard"
+                            ? "menu-item-icon-active"
+                            : "menu-item-icon-inactive"
+                        }`}
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          clipRule="evenodd"
+                          d="M5.5 3.25C4.25736 3.25 3.25 4.25736 3.25 5.5V8.99998C3.25 10.2426 4.25736 11.25 5.5 11.25H9C10.2426 11.25 11.25 10.2426 11.25 8.99998V5.5C11.25 4.25736 10.2426 3.25 9 3.25H5.5ZM4.75 5.5C4.75 5.08579 5.08579 4.75 5.5 4.75H9C9.41421 4.75 9.75 5.08579 9.75 5.5V8.99998C9.75 9.41419 9.41421 9.74998 9 9.74998H5.5C5.08579 9.74998 4.75 9.41419 4.75 8.99998V5.5ZM5.5 12.75C4.25736 12.75 3.25 13.7574 3.25 15V18.5C3.25 19.7426 4.25736 20.75 5.5 20.75H9C10.2426 20.75 11.25 19.7427 11.25 18.5V15C11.25 13.7574 10.2426 12.75 9 12.75H5.5ZM4.75 15C4.75 14.5858 5.08579 14.25 5.5 14.25H9C9.41421 14.25 9.75 14.5858 9.75 15V18.5C9.75 18.9142 9.41421 19.25 9 19.25H5.5C5.08579 19.25 4.75 18.9142 4.75 18.5V15ZM12.75 5.5C12.75 4.25736 13.7574 3.25 15 3.25H18.5C19.7426 3.25 20.75 4.25736 20.75 5.5V8.99998C20.75 10.2426 19.7426 11.25 18.5 11.25H15C13.7574 11.25 12.75 10.2426 12.75 8.99998V5.5ZM15 4.75C14.5858 4.75 14.25 5.08579 14.25 5.5V8.99998C14.25 9.41419 14.5858 9.74998 15 9.74998H18.5C18.9142 9.74998 19.25 9.41419 19.25 8.99998V5.5C19.25 5.08579 18.9142 4.75 18.5 4.75H15ZM15 12.75C13.7574 12.75 12.75 13.7574 12.75 15V18.5C12.75 19.7426 13.7574 20.75 15 20.75H18.5C19.7426 20.75 20.75 19.7427 20.75 18.5V15C20.75 13.7574 19.7426 12.75 18.5 12.75H15ZM14.25 15C14.25 14.5858 14.5858 14.25 15 14.25H18.5C18.9142 14.25 19.25 14.5858 19.25 15V18.5C19.25 18.9142 18.9142 19.25 18.5 19.25H15C14.5858 19.25 14.25 18.9142 14.25 18.5V15Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                      <span className={`menu-item-text ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+                        Dashboard
+                      </span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      className={`menu-item group ${
+                        activeView === "insights" ? "menu-item-active" : "menu-item-inactive"
+                      } ${sidebarCollapsed ? "lg:justify-center" : ""}`}
+                      onClick={() => handleViewChange("insights")}
+                    >
+                      <svg
+                        className={`menu-item-icon-size ${
+                          activeView === "insights"
+                            ? "menu-item-icon-active"
+                            : "menu-item-icon-inactive"
+                        }`}
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          clipRule="evenodd"
+                          d="M5.5 3.25C4.25736 3.25 3.25 4.25736 3.25 5.5V18.5C3.25 19.7426 4.25736 20.75 5.5 20.75H18.5C19.7426 20.75 20.75 19.7426 20.75 18.5V5.5C20.75 4.25736 19.7426 3.25 18.5 3.25H5.5ZM4.75 5.5C4.75 5.08579 5.08579 4.75 5.5 4.75H18.5C18.9142 4.75 19.25 5.08579 19.25 5.5V18.5C19.25 18.9142 18.9142 19.25 18.5 19.25H5.5C5.08579 19.25 4.75 18.9142 4.75 18.5V5.5ZM7 14.25C7.41421 14.25 7.75 14.5858 7.75 15V17.5C7.75 17.9142 7.41421 18.25 7 18.25C6.58579 18.25 6.25 17.9142 6.25 17.5V15C6.25 14.5858 6.58579 14.25 7 14.25ZM12 10.25C12.4142 10.25 12.75 10.5858 12.75 11V17.5C12.75 17.9142 12.4142 18.25 12 18.25C11.5858 18.25 11.25 17.9142 11.25 17.5V11C11.25 10.5858 11.5858 10.25 12 10.25ZM17 6.25C17.4142 6.25 17.75 6.58579 17.75 7V17.5C17.75 17.9142 17.4142 18.25 17 18.25C16.5858 18.25 16.25 17.9142 16.25 17.5V7C16.25 6.58579 16.5858 6.25 17 6.25Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                      <span className={`menu-item-text ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+                        Insights
+                      </span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      className={`menu-item group ${
+                        activeView === "setup" ? "menu-item-active" : "menu-item-inactive"
+                      } ${sidebarCollapsed ? "lg:justify-center" : ""}`}
+                      onClick={() => handleViewChange("setup")}
+                    >
+                      <svg
+                        className={`menu-item-icon-size ${
+                          activeView === "setup" ? "menu-item-icon-active" : "menu-item-icon-inactive"
+                        }`}
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          clipRule="evenodd"
+                          d="M10.3998 2.80078C11.232 1.92299 12.7681 1.92299 13.6003 2.80078L14.2972 3.55063C14.7398 4.02687 15.3954 4.22827 16.0365 4.07327L17.0624 3.82539C18.2634 3.53526 19.4387 4.38969 19.5572 5.61974L19.6571 6.6555C19.7196 7.30475 20.1215 7.86875 20.7333 8.14461L21.6777 8.57054C22.7999 9.07668 23.2903 10.4212 22.7401 11.3936L22.2359 12.2851C21.9143 12.8536 21.9143 13.5465 22.2359 14.115L22.7401 15.0065C23.2903 15.9789 22.7999 17.3234 21.6777 17.8295L20.7333 18.2555C20.1216 18.5313 19.7196 19.0952 19.6571 19.7445L19.5572 20.7803C19.4387 22.0103 18.2634 22.8647 17.0624 22.5746L16.0365 22.3267C15.3954 22.1717 14.7398 22.3731 14.2972 22.8494L13.6003 23.5992C12.7681 24.477 11.232 24.477 10.3998 23.5992L9.70303 22.8494C9.26035 22.3731 8.60469 22.1717 7.9636 22.3267L6.93772 22.5746C5.73669 22.8647 4.56145 22.0103 4.44289 20.7803L4.34306 19.7445C4.28051 19.0952 3.87856 18.5313 3.26683 18.2555L2.3224 17.8295C1.20017 17.3234 0.709777 15.9789 1.26001 15.0065L1.76417 14.115C2.0858 13.5465 2.0858 12.8536 1.76417 12.2851L1.26001 11.3936C0.709777 10.4212 1.20017 9.07668 2.3224 8.57054L3.26683 8.14461C3.87856 7.86875 4.28051 7.30475 4.34306 6.6555L4.44289 5.61974C4.56145 4.38969 5.73669 3.53526 6.93772 3.82539L7.9636 4.07327C8.60469 4.22827 9.26035 4.02687 9.70303 3.55063L10.3998 2.80078ZM12 8.25006C9.92893 8.25006 8.25 9.92899 8.25 12.0001C8.25 14.0711 9.92893 15.7501 12 15.7501C14.0711 15.7501 15.75 14.0711 15.75 12.0001C15.75 9.92899 14.0711 8.25006 12 8.25006Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                      <span className={`menu-item-text ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+                        Setup
+                      </span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </nav>
+            {!sidebarCollapsed && (
+              <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-theme-xs font-medium uppercase text-gray-400">Tenant</p>
+                <p className="mt-1 text-theme-sm font-semibold text-gray-700">
+                  {tenantToken ? "Connected" : "Not connected"}
+                </p>
+              </div>
             )}
           </div>
-        </header>
+        </aside>
+
+        <div className="relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 z-40 bg-gray-900/50 lg:hidden"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
+
+          <header className="sticky top-0 z-999 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex flex-col items-start justify-between gap-3 px-4 py-3 lg:flex-row lg:items-center lg:px-6">
+              <div className="flex items-center gap-3">
+                <button
+                  className="flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-500 lg:h-11 lg:w-11"
+                  onClick={handleSidebarToggle}
+                  aria-label="Toggle sidebar"
+                >
+                  <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
+                    <path
+                      fillRule="evenodd"
+                      clipRule="evenodd"
+                      d="M0.583252 1C0.583252 0.585788 0.919038 0.25 1.33325 0.25H14.6666C15.0808 0.25 15.4166 0.585786 15.4166 1C15.4166 1.41421 15.0808 1.75 14.6666 1.75L1.33325 1.75C0.919038 1.75 0.583252 1.41422 0.583252 1ZM0.583252 11C0.583252 10.5858 0.919038 10.25 1.33325 10.25L14.6666 10.25C15.0808 10.25 15.4166 10.5858 15.4166 11C15.4166 11.4142 15.0808 11.75 14.6666 11.75L1.33325 11.75C0.919038 11.75 0.583252 11.4142 0.583252 11ZM1.33325 5.25C0.919038 5.25 0.583252 5.58579 0.583252 6C0.583252 6.41421 0.919038 6.75 1.33325 6.75L7.99992 6.75C8.41413 6.75 8.74992 6.41421 8.74992 6C8.74992 5.58579 8.41413 5.25 7.99992 5.25L1.33325 5.25Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+                <div>
+                  <h1 className="text-lg font-semibold text-gray-800">Yotei Dashboard</h1>
+                  <p className="text-sm text-gray-500">
+                    TailAdmin template shell with Yotei review workflows.
+                  </p>
+                </div>
+              </div>
+              <div className="app__actions">
+                {activeView === "dashboard" ? (
+                  <>
+                    <button
+                      className="button ghost"
+                      onClick={refreshSession}
+                      disabled={loading || !selectedId}
+                    >
+                      Refresh
+                    </button>
+                    <button
+                      className="button"
+                      onClick={buildReview}
+                      disabled={buildStatus === "loading" || !selectedId}
+                    >
+                      {changeTree.length === 0 ? "Build Review" : "Rebuild Review"}
+                    </button>
+                  </>
+                ) : activeView === "insights" ? (
+                  <button
+                    className="button ghost"
+                    onClick={() =>
+                      fetchOrgInsights(insightsScope === "repo" ? selectedRepoFilter : null)
+                    }
+                    disabled={
+                      insightsStatus === "loading" ||
+                      (insightsScope === "repo" && !selectedRepoFilter)
+                    }
+                  >
+                    {insightsStatus === "loading" ? "Refreshing..." : "Refresh Insights"}
+                  </button>
+                ) : (
+                  <a
+                    className="button ghost"
+                    href={normalizedApiBase}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open API
+                  </a>
+                )}
+              </div>
+            </div>
+          </header>
+          <div className="mx-auto w-full max-w-(--breakpoint-2xl) p-4 md:p-6">
       {activeView === "setup" ? (
         renderSetup()
       ) : activeView === "insights" ? (
@@ -2836,6 +2982,8 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
           </div>
         </>
       )}
+          </div>
+        </div>
       </div>
     </div>
   );
