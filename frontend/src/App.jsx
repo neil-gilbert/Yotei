@@ -1909,20 +1909,18 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               sidebarCollapsed ? "justify-center" : "justify-between"
             }`}
           >
-            <a href={normalizedApiBase} target="_blank" rel="noreferrer">
-              <span className={`logo ${sidebarCollapsed ? "hidden" : ""}`}>
-                <img className="dark:hidden" src="/images/logo/logo.svg" alt="TailAdmin Logo" />
-                <img
-                  className="hidden dark:block"
-                  src="/images/logo/logo-dark.svg"
-                  alt="TailAdmin Logo"
-                />
-              </span>
+            <a
+              className={`flex items-center gap-3 ${sidebarCollapsed ? "justify-center" : ""}`}
+              href={normalizedApiBase}
+              target="_blank"
+              rel="noreferrer"
+            >
               <img
-                className={`logo-icon ${sidebarCollapsed ? "lg:block" : "hidden"}`}
-                src="/images/logo/logo-icon.svg"
-                alt="TailAdmin Logo"
+                className={`h-8 w-8 object-contain ${sidebarCollapsed ? "lg:block" : ""}`}
+                src={LogoStandard}
+                alt="Yotei Logo"
               />
+              {!sidebarCollapsed && <span className="text-lg font-semibold text-gray-800">Yotel</span>}
             </a>
           </div>
 
@@ -2065,12 +2063,6 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
                     />
                   </svg>
                 </button>
-                <div>
-                  <h1 className="text-lg font-semibold text-gray-800">Yotei Dashboard</h1>
-                  <p className="text-sm text-gray-500">
-                    TailAdmin template shell with Yotei review workflows.
-                  </p>
-                </div>
               </div>
               <div className="app__actions">
                 {activeView === "dashboard" ? (
