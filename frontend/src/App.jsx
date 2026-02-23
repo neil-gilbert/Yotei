@@ -2108,7 +2108,7 @@ VITE_GITHUB_APP_INSTALL_URL=...`}</pre>
               </div>
             </div>
           </header>
-          <div className="mx-auto w-full max-w-(--breakpoint-2xl) p-4 md:p-6">
+          <div className="w-full max-w-full px-4 py-4 pr-6 md:p-6">
       {activeView === "setup" ? (
         renderSetup()
       ) : activeView === "insights" ? (

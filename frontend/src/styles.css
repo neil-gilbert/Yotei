@@ -2823,4 +2823,181 @@ body {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .app__actions {
+    width: 100%;
+  }
+
+  .app__actions .button {
+    flex: 1 1 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .review__header,
+  .review__header-actions,
+  .summary__header,
+  .flow__header,
+  .tree__header,
+  .full-diff__header,
+  .voice__controls,
+  .diff__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .review__header-actions,
+  .full-diff__controls,
+  .voice__actions,
+  .checklist__actions,
+  .compliance__actions,
+  .voice__transcript-actions,
+  .tree__actions,
+  .setup__code-actions,
+  .setup__footer-actions {
+    width: 100%;
+  }
+
+  .review__header-actions .button,
+  .full-diff__controls .button,
+  .voice__actions .button,
+  .checklist__actions .button,
+  .compliance__actions .button,
+  .voice__transcript-actions .button,
+  .tree__actions .button,
+  .setup__code-actions .button,
+  .setup__footer-actions .button {
+    flex: 1 1 100%;
+    text-align: center;
+  }
+
+  .pagination,
+  .detail__filters,
+  .full-diff__layout,
+  .setup__token-row,
+  .setup__signal-header,
+  .insights-panel__header,
+  .insights-hero__actions,
+  .voice-mascot__context {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .field,
+  .pager,
+  .voice__button,
+  .tabs__button {
+    width: 100%;
+  }
+
+  .tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .full-diff__files,
+  .detail__list,
+  .tree__list,
+  .diff__viewer,
+  .diff__code {
+    max-height: 320px;
+  }
+
+  .diff__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .diff__gutter {
+    grid-template-columns: repeat(2, minmax(0, auto));
+    justify-content: start;
+    border-right: none;
+    border-bottom: 1px solid #e4e7ec;
+    padding-right: 0;
+    padding-bottom: 4px;
+  }
+
+  .insights-bar,
+  .insights-heat__row,
+  .insights__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .insights-bar__value,
+  .insights-heat__value,
+  .insights__count {
+    text-align: left;
+  }
+
+  .chat-sidebar {
+    top: 0;
+  }
+
+  .voice-mascot {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    align-items: stretch;
+  }
+
+  .voice-mascot__hint,
+  .voice-mascot__button {
+    align-self: flex-end;
+  }
+
+  .card {
+    padding: 16px;
+  }
+
+  .setup,
+  .setup__hero,
+  .setup__hero > *,
+  .setup__cta,
+  .setup__callout,
+  .setup__pill,
+  .setup__signal,
+  .setup__step,
+  .setup__footer {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .setup__callout,
+  .setup__pill,
+  .setup__signal,
+  .setup__step,
+  .setup__footer,
+  .review .card,
+  .insights-page .card {
+    width: calc(100% - 16px);
+  }
+
+  .app,
+  .admin-main,
+  .app__content,
+  .review,
+  .review__column,
+  .tabs-card,
+  .full-diff__content,
+  .insights-page,
+  .setup {
+    min-width: 0;
+  }
+
+  .full-diff__file-path {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .diff__line-content {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
 }
